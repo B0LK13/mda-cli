@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Fallback launcher when the pip console script is not on PATH.
+# install-global.sh copies this to ~/.local/bin/mda
+
+set -euo pipefail
+
+if [[ -n "${PYTHON:-}" ]] && command -v "$PYTHON" >/dev/null 2>&1; then
+  exec "$PYTHON" -m mda_cli "$@"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 -m mda_cli "$@"
+fi
+
+if command -v python >/dev/null 2>&1; then
+  exec python -m mda_cli "$@"
+fi
+
+echo "mda: python3 not found" >&2
+exit 127
