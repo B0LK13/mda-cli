@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9]
+
+- TUI: live read-only preview of the highlighted supported file (`.md`, `.txt`, `.pdf`, `.docx`, `.doc` listing).
+- Async extraction with 150ms debounce, path+mtime cache, truncation at 10k chars, metadata line (path, ext, size).
+- Clear preview on `..`/directories; friendly errors for missing PDF/DOCX extras and legacy `.doc`.
+- Toggle preview pane with **I** (`i`); **P** still runs MDA.
+
 ## [0.2.8]
 
 - TUI and batch CLI accept `.md`, `.pdf`, `.docx`, `.doc`, and `.txt` (case-insensitive).

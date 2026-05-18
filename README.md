@@ -78,6 +78,7 @@ Synonyms everywhere: `mda-cli`, `mda-tui`.
    - **Backspace** goes up
    - **H** jumps to your home folder
    - **U** = **Use this folder** when you are in the right place
+   - **I** toggles the live document preview pane (highlight a supported file to see original content)
    - **Q** quits
 
 5. **Select files** (`.md`, `.pdf`, `.docx`, `.txt`, …) and run:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mda-cli"
-version = "0.2.8"
+version = "0.2.9"
 description = "CLI wrapper for Markdown Document Architect — restructure Markdown via Anthropic using local SKILL.md + MDA-STANDARD.md"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -11,10 +11,15 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Header, Input, Label, RichLog
+from textual.widgets import DataTable, Footer, Header, Input, Label, RichLog, TextArea
 
 from mda_cli.core import Job, find_skill_dir, jobs_from_document_files, load_system_prompt
-from mda_cli.document_io import is_supported_extension, supported_extensions
+from mda_cli.document_io import DocumentReadError, is_supported_extension, read_document_text, supported_extensions
+from mda_cli.preview import (
+    DEFAULT_PREVIEW_MAX_CHARS,
+    format_preview_metadata,
+    truncate_preview_text,
+)
 from mda_cli.providers import (
     build_restructure_client,
     ensure_api_credentials,
@@ -96,13 +101,17 @@ class FilterScreen(ModalScreen[str | None]):
 
 
 class MdaNavigatorApp(App[None]):
-    """Two-pane browser + log. Select supported documents with Space, run with P."""
+    """File browser + live document preview + log. Select with Space, run with P."""
 
     CSS = """
     #main { height: 100%; }
-    #left { width: 45%; height: 100%; border: heavy $primary; padding: 0 1; }
+    #left { width: 38%; height: 100%; border: heavy $primary; padding: 0 1; }
+    #preview-col { width: 32%; height: 100%; border: heavy $primary; padding: 0 1; }
+    #preview-col.hidden { display: none; }
     #right { width: 1fr; height: 100%; border: heavy $primary; padding: 0 1; }
     #listing { height: 1fr; min-height: 10; }
+    #preview-meta { height: auto; max-height: 3; text-style: bold; }
+    #preview-body { height: 1fr; min-height: 8; }
     #log { height: 1fr; min-height: 10; background: $surface; }
     Label { margin: 0 0 1 0; }
     """
@@ -111,6 +120,7 @@ class MdaNavigatorApp(App[None]):
         Binding("q", "quit", "Quit", show=True),
         Binding("escape", "quit", "Quit"),
         Binding("o", "cycle_output", "Output mode", show=True),
+        Binding("i", "toggle_preview", "Preview", show=True),
         Binding("p", "run_mda", "Run MDA", show=True),
         Binding("g", "focus_out_dir", "Out folder", show=True),
         Binding("h", "go_home", "Home", show=True),
@@ -151,6 +161,10 @@ class MdaNavigatorApp(App[None]):
         self._col_name_key: object | None = None
         self.name_filter: str = ""
         self.show_hidden: bool = False
+        self.show_preview_pane: bool = True
+        self._preview_cache: tuple[Path, float, str, str | None] | None = None
+        self._preview_timer = None
+        self._preview_load_id: int = 0
 
     def _alloc_row_key(self) -> str:
         self._row_key_seq += 1
@@ -169,6 +183,10 @@ class MdaNavigatorApp(App[None]):
                     placeholder="Output folder when mode is out_dir (absolute or ~)",
                     id="out-dir",
                 )
+            with Vertical(id="preview-col"):
+                yield Label("Preview", id="preview-title")
+                yield Label("", id="preview-meta")
+                yield TextArea("", id="preview-body", read_only=True)
             with Vertical(id="right"):
                 yield RichLog(id="log", highlight=True, markup=True)
         yield Footer()
@@ -183,9 +201,10 @@ class MdaNavigatorApp(App[None]):
             f"[dim]Supported:[/] {exts}\n"
             "[dim]Space[/] toggle file  [dim]Enter[/] open dir  [dim]Backspace[/] up  "
             "[dim]ctrl+j[/] jump  [dim]f[/] filter  [dim]v[/] hidden  "
-            "[dim]a[/] recursive select  [dim]k/j[/] up/down  [dim]O[/] output  [dim]P[/] run  "
-            "[dim]G[/] out-folder  [dim]H[/] home"
+            "[dim]a[/] recursive select  [dim]k/j[/] up/down  [dim]I[/] preview pane  "
+            "[dim]O[/] output  [dim]P[/] run  [dim]G[/] out-folder  [dim]H[/] home"
         )
+        self._apply_preview_pane_visibility()
 
     def on_key(self, event: events.Key) -> None:
         """Route navigation keys to the file listing; DataTable swallows them otherwise."""
@@ -215,10 +234,17 @@ class MdaNavigatorApp(App[None]):
             listing.action_cursor_up()
             event.prevent_default()
             event.stop()
+            self._schedule_preview_update()
         elif event.key == "j":
             listing.action_cursor_down()
             event.prevent_default()
             event.stop()
+            self._schedule_preview_update()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if event.data_table.id != "listing":
+            return
+        self._schedule_preview_update()
 
     def log_msg(self, message: str) -> None:
         self.query_one("#log", RichLog).write(message)
@@ -317,6 +343,112 @@ class MdaNavigatorApp(App[None]):
             self.query_one("#out-dir", Input).focus()
         else:
             self.query_one("#listing", DataTable).focus()
+        self._schedule_preview_update()
+
+    def _apply_preview_pane_visibility(self) -> None:
+        col = self.query_one("#preview-col")
+        if self.show_preview_pane:
+            col.remove_class("hidden")
+        else:
+            col.add_class("hidden")
+
+    def action_toggle_preview(self) -> None:
+        self.show_preview_pane = not self.show_preview_pane
+        self._apply_preview_pane_visibility()
+        if self.show_preview_pane:
+            self._schedule_preview_update()
+        else:
+            self._clear_preview_pane()
+
+    def _clear_preview_pane(self) -> None:
+        self.query_one("#preview-meta", Label).update("")
+        self.query_one("#preview-body", TextArea).load_text("")
+
+    def _highlighted_preview_path(self) -> Path | None:
+        idx = self._cursor_row_index()
+        if idx is None:
+            return None
+        path, kind = self._rows[idx]
+        if path is None or kind in ("up", "dir"):
+            return None
+        if not is_supported_extension(path):
+            return None
+        return path
+
+    def _schedule_preview_update(self) -> None:
+        if not self.show_preview_pane:
+            return
+        if self._preview_timer is not None:
+            self._preview_timer.stop()
+        self._preview_timer = self.set_timer(0.15, self._on_preview_debounce)
+
+    def _on_preview_debounce(self) -> None:
+        self._preview_timer = None
+        path = self._highlighted_preview_path()
+        if path is None:
+            self._preview_load_id += 1
+            self._clear_preview_pane()
+            return
+        self._start_preview_load(path)
+
+    def _start_preview_load(self, path: Path) -> None:
+        self._preview_load_id += 1
+        load_id = self._preview_load_id
+        try:
+            mtime = path.stat().st_mtime
+        except OSError as e:
+            self._render_preview(path, "", f"Cannot read file: {e}", truncated=False)
+            return
+        cached = self._preview_cache
+        if cached is not None and cached[0] == path and cached[1] == mtime:
+            body, truncated = truncate_preview_text(
+                cached[2], max_chars=DEFAULT_PREVIEW_MAX_CHARS
+            )
+            self._render_preview(path, body, cached[3], truncated=truncated)
+            return
+        self.query_one("#preview-meta", Label).update(format_preview_metadata(path))
+        self.query_one("#preview-body", TextArea).load_text("Loading…")
+        self._load_preview_worker(path, load_id, mtime)
+
+    @work(exclusive=True)
+    async def _load_preview_worker(self, path: Path, load_id: int, mtime: float) -> None:
+        try:
+            raw = await asyncio.to_thread(read_document_text, path)
+            err: str | None = None
+        except DocumentReadError as e:
+            raw, err = "", str(e)
+        except OSError as e:
+            raw, err = "", f"Cannot read file: {e}"
+        if load_id != self._preview_load_id:
+            return
+        self._preview_cache = (path, mtime, raw, err)
+        truncated = False
+        body = raw
+        if err is None:
+            body, truncated = truncate_preview_text(raw, max_chars=DEFAULT_PREVIEW_MAX_CHARS)
+        self._render_preview(path, body, err, truncated=truncated)
+
+    def _render_preview(
+        self,
+        path: Path,
+        body: str,
+        error: str | None,
+        *,
+        truncated: bool,
+    ) -> None:
+        meta = format_preview_metadata(path, error=error)
+        self.query_one("#preview-meta", Label).update(meta)
+        if error:
+            text = error if not body else f"{error}\n\n{body}"
+        elif body == "":
+            text = "(empty)"
+        else:
+            text = body
+        if truncated and not error:
+            text = f"{text}\n\n… truncated"
+        elif truncated:
+            text = f"{text}\n\n… truncated"
+        self.query_one("#preview-body", TextArea).load_text(text)
 
     def _sync_selectable_row_star(self, path: Path) -> None:
         if self._col_name_key is None:
