@@ -25,6 +25,37 @@ jobs:
       - name: Unit tests (exclude integration)
         run: pytest -q -m "not integration"
 
+  smoke-install-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke install (install-global.sh) and mda --check
+        env:
+          MDA_CLI_ROOT: ${{ github.workspace }}
+        run: |
+          bash scripts/install-global.sh
+          export PATH="$HOME/.local/bin:$PATH"
+          command -v mda
+          mda --check
+
+  smoke-install-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke install (install-global.ps1) and mda --check
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/install-global.ps1
+
   integration:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

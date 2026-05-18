@@ -33,7 +33,7 @@ Core CI lands in PR #16. Remaining gaps: install smoke on runners, optional inte
 | **CI-R1** | P2 | M | Publish pytest coverage summary (and optional `coverage.xml` artifact) on PR CI. | [#22](https://github.com/B0LK13/mda-cli/issues/22) |
 | **CI-R2** | P2 | S | Add `ruff format --check` or format job alongside lint (if not already enforced). | [#23](https://github.com/B0LK13/mda-cli/issues/23) |
 | — | P0 | M | GitHub Actions: ruff + pytest on push/PR. | **Related to #1** (PR #16) |
-| — | P1 | M | CI smoke: `mda --check` after install on Windows and Linux. | **Related to #2** (deferred) |
+| — | P1 | M | CI smoke: `mda --check` after install on Windows and Linux. | **Related to #2** (PR #16) |
 | — | P1 | M | Optional CI job for Anthropic integration tests. | **Related to #4** (deferred) |
 | — | P2 | S | Dependabot for pip and GitHub Actions. | **Related to #15** (PR #16) |
 
@@ -140,11 +140,11 @@ Work intentionally left open after [PR #16](https://github.com/B0LK13/mda-cli/pu
 
 | Item | Issue | Notes |
 |------|-------|-------|
-| CI install smoke (Win + Linux) | [#2](https://github.com/B0LK13/mda-cli/issues/2) | Complements DIST/CI; run after #1 merges |
+| CI install smoke (Win + Linux) | [#2](https://github.com/B0LK13/mda-cli/issues/2) | In PR #16 (`smoke-install-*` CI jobs) |
 | Optional Anthropic integration CI | [#4](https://github.com/B0LK13/mda-cli/issues/4) | Nightly or `workflow_dispatch`; ROADMAP Q6 |
 | Backup manifest + `mda restore` | [#14](https://github.com/B0LK13/mda-cli/issues/14) | Phase 2; pairs with TUI-R4 |
 | Post-merge: tag `v0.2.10` and verify release workflow | — | Operational; see PR #16 test plan |
-| Close #1, #3, #5–#13, #15 when PR #16 merges | — | Use `Closes #N` in merge commit |
+| Close #1–#3, #5–#13, #15, #2 when PR #16 merges | — | Use `Closes #N` in merge commit |
 
 ---
 
@@ -155,6 +155,6 @@ Work intentionally left open after [PR #16](https://github.com/B0LK13/mda-cli/pu
 | Topics | 10 |
 | New recommendations (issues to file) | 31 |
 | Already tracked (#1–#15 / PR #16) | 15 |
-| Deferred explicit (#2, #4, #14) | 3 |
+| Deferred explicit (#4, #14) | 2 |
 
 *Last updated: 2026-05-18*
