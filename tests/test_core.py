@@ -262,7 +262,7 @@ def test_write_output_text_creates_backup(tmp_path: Path) -> None:
     changed, backup_path, bytes_out = write_output_text(dst, "new\n", create_backup=True)
 
     assert changed is True
-    assert bytes_out == len("new\n".encode("utf-8"))
+    assert bytes_out == len(b"new\n")
     assert backup_path is not None
     assert backup_path.read_text(encoding="utf-8") == "old\n"
     assert dst.read_text(encoding="utf-8") == "new\n"
@@ -276,7 +276,7 @@ def test_write_output_text_unchanged_skips_rewrite(tmp_path: Path) -> None:
 
     assert changed is False
     assert backup_path is None
-    assert bytes_out == len("same\n".encode("utf-8"))
+    assert bytes_out == len(b"same\n")
 
 
 def test_process_job_returns_metadata_and_backup(

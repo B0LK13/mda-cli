@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 
 from mda_cli import __version__
+from mda_cli.backup import (
+    list_manifest_files,
+    load_manifest,
+    new_run_id,
+    summarize_manifest,
+    write_batch_manifest,
+)
 from mda_cli.core import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
@@ -33,6 +40,26 @@ from mda_cli.providers import (
     provider_check_lines,
     resolve_provider_name,
 )
+
+
+def run_restore_list() -> int:
+    """List backup manifests written by prior batch runs."""
+    paths = list_manifest_files()
+    if not paths:
+        print("No backup manifests found (batch runs write to ~/.mda/manifests/).")
+        return 0
+    for path in paths:
+        try:
+            data = load_manifest(path)
+            print(f"{path.name}\t{summarize_manifest(data)}")
+        except (OSError, ValueError) as e:
+            print(f"{path.name}\tERROR: {e}", file=sys.stderr)
+    print(
+        "\nRestore apply is not implemented yet; copy files from backup_path entries "
+        "or use git on tracked vaults.",
+        file=sys.stderr,
+    )
+    return 0
 
 
 def run_check(
@@ -309,6 +336,17 @@ def _parse_script_argv(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     raw_argv = sys.argv[1:] if argv is None else list(argv)
 
+    if raw_argv and raw_argv[0] == "restore":
+        rest = raw_argv[1:]
+        if rest == ["--list"] or rest == ["-l"]:
+            return run_restore_list()
+        print(
+            "Usage: mda restore --list\n"
+            "       (restore apply not implemented yet; see manifest backup_path entries)",
+            file=sys.stderr,
+        )
+        return 2
+
     if raw_argv and raw_argv[0] == "script":
         args = _parse_script_argv(raw_argv[1:])
         script_args = list(args.script_args)
@@ -414,6 +452,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Provider: {ctx.provider} (model: {ctx.model})", file=sys.stderr)
 
     failures = 0
+    results: list[JobResult] = []
     for job in jobs:
         try:
             result = process_job_with_provider(
@@ -426,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_attempts=max_attempts,
                 backup_in_place=args.backup,
             )
+            results.append(result)
             if args.json_lines:
                 print_json_line(job_result_record(result, provider=ctx.provider))
             if not result.ok:
@@ -434,13 +474,25 @@ def main(argv: list[str] | None = None) -> int:
             failures += 1
             msg = friendly_api_message(e)
             print(f"   FAILED: {job.src}: {msg}", file=sys.stderr)
+            failed = JobResult(job=job, ok=False, action="failed", error=msg)
+            results.append(failed)
             if args.json_lines:
                 print_json_line(
-                    job_result_record(
-                        JobResult(job=job, ok=False, action="failed", error=msg),
-                        provider=ctx.provider,
-                    )
+                    job_result_record(failed, provider=ctx.provider),
                 )
+
+    run_id = new_run_id()
+    manifest_path = write_batch_manifest(
+        run_id=run_id,
+        results=results,
+        skill_id=skill_id,
+        provider=ctx.provider,
+        target=args.target,
+        in_place=args.in_place,
+        backup_enabled=args.backup,
+    )
+    if not args.json_lines:
+        print(f"Backup manifest: {manifest_path}", file=sys.stderr)
 
     if not args.json_lines:
         print(f"Done. {len(jobs) - failures}/{len(jobs)} succeeded.", file=sys.stderr)

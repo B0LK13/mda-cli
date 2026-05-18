@@ -76,10 +76,11 @@ def main() -> int:
             print(f"ERROR {src}: {e}", file=sys.stderr)
             errors += 1
 
-    print(
-        f"Done. moved={moved} already_in_root={skipped_root} errors={errors} dry_run={args.dry_run}",
-        file=sys.stderr,
+    summary = (
+        f"Done. moved={moved} already_in_root={skipped_root} "
+        f"errors={errors} dry_run={args.dry_run}"
     )
+    print(summary, file=sys.stderr)
     return 0 if errors == 0 else 1
 
 

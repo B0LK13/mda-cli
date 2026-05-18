@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+- Backup manifests: each batch run writes `~/.mda/manifests/<run_id>.json` (override with `MDA_MANIFEST_DIR`); `mda restore --list` shows runs (apply not implemented yet).
+- TUI: press **S** to cycle bundled skills (`markdown-document-architect`, `categorize-vault-notes`).
+- Docs: `docs/LOCAL-DEV.md` for local branch workflow without GitHub CI.
+- README: note that integration tests need `ANTHROPIC_API_KEY`.
+
+## [0.2.10]
+
+- GitHub Actions: ruff + unit pytest on push/PR; optional integration job on `main`.
+- CI smoke: `install-global.sh` / `install-global.ps1` then `mda --check` on Linux and Windows.
+- Tag-driven release workflow uploads wheel/sdist to GitHub Releases.
+- `.env.example` for API keys and `MDA_*` variables.
+- `install-global.ps1`: dynamic Python 3.10+ discovery (`py`, `python3`, `MDA_PYTHON`); stop `mda` processes before pip.
+- `plan_moves`: dry-run by default; `--apply` to move files.
+- Docs: `docs/VAULT-PLAYBOOK.md`, `docs/TROUBLESHOOTING.md`, README cost guardrails.
+- TUI: batch progress (`Batch N/M`) and inline last API error status line.
+- Dependabot for pip and GitHub Actions.
+
 ## [0.2.9]
 
 - TUI: live read-only preview of the highlighted supported file (`.md`, `.txt`, `.pdf`, `.docx`, `.doc` listing).

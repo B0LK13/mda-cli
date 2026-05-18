@@ -1,13 +1,98 @@
 # Install mda-cli and ensure `mda` is on the user PATH (no admin required).
 # Usage: pwsh -File scripts\install-global.ps1
+#
+# Optional: set MDA_PYTHON to a specific python.exe before running.
 
 $ErrorActionPreference = 'Stop'
 
-$Python = 'C:\Users\Admin\AppData\Local\Programs\Python\Python313\python.exe'
-if (-not (Test-Path $Python)) {
-    $Python = (Get-Command python -ErrorAction SilentlyContinue)?.Source
-    if (-not $Python) { throw 'Python not found. Set $Python at the top of this script or install Python 3.10+.' }
+function Get-MdaPythonExecutable {
+    if ($env:MDA_PYTHON) {
+        $explicit = $env:MDA_PYTHON.Trim().Trim('"')
+        if (Test-Path $explicit) {
+            return (Resolve-Path $explicit).Path
+        }
+        throw "MDA_PYTHON is set but not found: $explicit"
+    }
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    function Add-Candidate([string]$Path) {
+        if ([string]::IsNullOrWhiteSpace($Path)) { return }
+        try {
+            $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+        }
+        catch {
+            return
+        }
+        if ($seen.Add($resolved)) {
+            [void]$candidates.Add($resolved)
+        }
+    }
+
+    $pyCmd = Get-Command py -ErrorAction SilentlyContinue
+    if ($pyCmd) {
+        foreach ($ver in @('-3.13', '-3.12', '-3.11', '-3.10')) {
+            try {
+                $out = & py $ver -c "import sys; print(sys.executable)" 2>$null
+                if ($LASTEXITCODE -eq 0 -and $out) {
+                    Add-Candidate ($out.Trim())
+                }
+            }
+            catch { }
+        }
+    }
+
+    foreach ($name in @('python3', 'python')) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { Add-Candidate $cmd.Source }
+    }
+
+    $localApp = [Environment]::GetFolderPath('LocalApplicationData')
+    if ($localApp) {
+        Get-ChildItem -Path (Join-Path $localApp 'Programs\Python') -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object { Add-Candidate $_.FullName }
+    }
+
+    foreach ($candidate in $candidates) {
+        try {
+            $version = & $candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+            if ($LASTEXITCODE -ne 0) { continue }
+            $parts = $version.Trim().Split('.')
+            if ($parts.Count -ge 2) {
+                $major = [int]$parts[0]
+                $minor = [int]$parts[1]
+                if ($major -eq 3 -and $minor -ge 10) {
+                    return $candidate
+                }
+            }
+        }
+        catch { }
+    }
+
+    throw @(
+        'Python 3.10+ not found.'
+        'Install Python, set MDA_PYTHON to python.exe, or ensure `py -3.12` / `python` works.'
+    ) -join ' '
 }
+
+function Stop-MdaInstallProcesses {
+    $stopped = $false
+    foreach ($procName in @('mda', 'mda-cli', 'mda-tui')) {
+        $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
+        if ($procs) {
+            $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+            $stopped = $true
+        }
+    }
+    if ($stopped) {
+        Write-Host 'Stopped running mda process(es) so pip can replace mda.exe.'
+        Start-Sleep -Milliseconds 750
+    }
+}
+
+$Python = Get-MdaPythonExecutable
+Write-Host "Using Python: $Python"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $RepoRoot 'pyproject.toml'))) {
@@ -15,6 +100,8 @@ if (-not (Test-Path (Join-Path $RepoRoot 'pyproject.toml'))) {
 }
 
 $ScriptsDir = Join-Path (Split-Path -Parent $Python) 'Scripts'
+
+Stop-MdaInstallProcesses
 
 Write-Host "Installing mda-cli from $RepoRoot ..."
 & $Python -m pip install -e $RepoRoot
