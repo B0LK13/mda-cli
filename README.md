@@ -180,11 +180,11 @@ Pair with `scripts\flatten_vault_md.py` when moving nested notes to the vault ro
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Primary provider (default when set) |
-| `OPENROUTER_API_KEY` | OpenRouter provider or Anthropic fallback |
+| `OPENROUTER_API_KEY` | **Recommended for fallback:** automatic retry when Anthropic billing/auth/rate limits fail |
 | `MDA_PROVIDER` | `anthropic` or `openrouter` for this shell |
-| `MDA_USE_OPENROUTER` | Set to `1` to prefer OpenRouter |
+| `MDA_USE_OPENROUTER` | Set to `1` to prefer OpenRouter as primary |
 | `MDA_OPENROUTER_MODEL` | OpenRouter model id (default `anthropic/claude-sonnet-4`) |
-| `MDA_OPENROUTER_FALLBACK` | `1` (default) retry via OpenRouter when Anthropic returns 402/403/429/529/5xx |
+| `MDA_OPENROUTER_FALLBACK` | `1` (default) — retry via OpenRouter on Anthropic 400 (billing), 401, 402, 403, 429, 529, 5xx; set `0` to disable |
 
 CLI override: `mda --provider openrouter path\to\file.md`
 

@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.3.5]
+
+- **OpenRouter fallback fix:** Anthropic billing/credit **400** responses now trigger automatic OpenRouter retry (previously only **402+** status codes did). Billing detection also uses error body text and wrapped RuntimeError messages.
+- **TUI/CLI:** Logs `Anthropic failed (billing); retrying via OpenRouter…` before fallback; on double failure, `#api-status` shows both Anthropic and OpenRouter errors (`anthropic+openrouter`).
+
+## [0.3.4]
+
+- **OpenRouter fallback (default on):** When Anthropic fails with billing/credit **400**, **401**, **402**, **403**, **429**, **529**, or **5xx**, batch and CLI runs automatically retry via OpenRouter if `OPENROUTER_API_KEY` is set (`MDA_OPENROUTER_FALLBACK=0` disables).
+- **TUI:** Logs `Used OpenRouter fallback for <file>` on success; `#api-status` shows provider on fallback or failure.
+- **`mda --check`:** Reports whether Anthropic → OpenRouter fallback is ready (both keys, model id).
+
 ## [0.3.3]
 
 - **TUI:** Fix file preview on row highlight and Space selection for all supported extensions (`.md`, `.txt`, `.pdf`, `.docx`, etc.). Row keys are tracked reliably after listing refresh; preview pane no longer steals keyboard focus; cursor restores to the highlighted file after filter/hidden toggles.

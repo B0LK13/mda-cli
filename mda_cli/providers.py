@@ -16,10 +16,9 @@ from mda_cli.core import (
     DEFAULT_API_TIMEOUT,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
-    strip_outer_fence,
-)
-from mda_cli.core import (
+    anthropic_error_is_billing_related,
     friendly_api_message as _friendly_anthropic,
+    strip_outer_fence,
 )
 
 ProviderName = Literal["anthropic", "openrouter"]
@@ -28,7 +27,7 @@ DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # HTTP status codes that trigger OpenRouter fallback when MDA_OPENROUTER_FALLBACK is on.
-_FALLBACK_STATUS_CODES = frozenset({402, 403, 429, 500, 502, 503, 504, 529})
+_FALLBACK_STATUS_CODES = frozenset({400, 401, 402, 403, 429, 500, 502, 503, 504, 529})
 
 
 def _truthy_env(name: str, *, default: bool = False) -> bool:
@@ -99,18 +98,88 @@ def ensure_api_credentials(provider: ProviderName) -> None:
 def provider_check_lines(*, cli_provider: str | None = None) -> list[str]:
     """Human-readable lines for ``mda --check`` (no secrets)."""
     primary = resolve_provider_name(cli_provider=cli_provider)
+    fb_on = openrouter_fallback_enabled()
+    or_key = openrouter_api_key_set()
     lines = [
         f"ANTHROPIC_API_KEY set: {'yes' if anthropic_api_key_set() else 'no'}",
-        f"OPENROUTER_API_KEY set: {'yes' if openrouter_api_key_set() else 'no'}",
+        f"OPENROUTER_API_KEY set: {'yes' if or_key else 'no'}",
         f"Default provider (this run): {primary}",
-        f"MDA_OPENROUTER_FALLBACK: {'on' if openrouter_fallback_enabled() else 'off'}",
+        f"MDA_OPENROUTER_FALLBACK: {'on' if fb_on else 'off'}",
     ]
+    if primary == "anthropic" and fb_on:
+        if or_key:
+            fb_model = resolve_model("openrouter", None)
+            lines.append(
+                f"Anthropic -> OpenRouter fallback: ready (model {fb_model})"
+            )
+        else:
+            lines.append(
+                "Anthropic -> OpenRouter fallback: enabled but OPENROUTER_API_KEY missing"
+            )
+    elif primary == "anthropic" and not fb_on:
+        lines.append("Anthropic -> OpenRouter fallback: disabled")
     if primary == "openrouter":
         model = resolve_model("openrouter", None)
         lines.append(f"OpenRouter model: {model}")
     else:
         lines.append(f"Anthropic model (MDA_MODEL): {resolve_model('anthropic', None)}")
     return lines
+
+
+def _unwrap_anthropic_exception(exc: BaseException) -> BaseException:
+    if isinstance(exc, RuntimeError):
+        if exc.__cause__ is not None:
+            return _unwrap_anthropic_exception(exc.__cause__)
+        if exc.__context__ is not None and exc.__context__ is not exc:
+            return _unwrap_anthropic_exception(exc.__context__)
+    return exc
+
+
+def _runtime_error_suggests_anthropic_billing(exc: BaseException) -> bool:
+    """Detect billing/credit failures when only the wrapped RuntimeError message is available."""
+    if not isinstance(exc, RuntimeError):
+        return False
+    text = str(exc).lower()
+    return any(
+        token in text
+        for token in (
+            "billing/credits error (400)",
+            "billing/credits error",
+            "credit balance",
+            "insufficient credits",
+            "purchase credits",
+        )
+    )
+
+
+def anthropic_fallback_reason(exc: BaseException) -> str:
+    """Short label for user-facing fallback log lines."""
+    root = _unwrap_anthropic_exception(exc)
+    try:
+        from anthropic import (
+            APIStatusError,
+            AuthenticationError,
+            PermissionDeniedError,
+            RateLimitError,
+        )
+    except ImportError:
+        return "API error"
+
+    if isinstance(root, RateLimitError):
+        return "rate limit"
+    if isinstance(root, (AuthenticationError, PermissionDeniedError)):
+        return "authentication"
+    if isinstance(root, APIStatusError):
+        code = int(getattr(root, "status_code", None) or 0)
+        if code == 400 and anthropic_error_is_billing_related(root):
+            return "billing"
+        if code in (402,):
+            return "billing"
+        if code:
+            return f"HTTP {code}"
+    if _runtime_error_suggests_anthropic_billing(exc):
+        return "billing"
+    return "API error"
 
 
 def anthropic_error_warrants_fallback(exc: BaseException) -> bool:
@@ -128,18 +197,35 @@ def anthropic_error_warrants_fallback(exc: BaseException) -> bool:
     except ImportError:
         return False
 
-    if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
+    root = _unwrap_anthropic_exception(exc)
+
+    if isinstance(root, (AuthenticationError, PermissionDeniedError)):
         return True
-    if isinstance(exc, RateLimitError):
+    if isinstance(root, RateLimitError):
         return True
-    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+    if isinstance(root, (APIConnectionError, APITimeoutError)):
         return False
-    if isinstance(exc, APIStatusError):
-        code = getattr(exc, "status_code", None) or 0
-        return int(code) in _FALLBACK_STATUS_CODES
-    if isinstance(exc, RuntimeError) and exc.__cause__ is not None:
-        return anthropic_error_warrants_fallback(exc.__cause__)
-    return False
+    if isinstance(root, APIStatusError):
+        code = int(getattr(root, "status_code", None) or 0)
+        if code in _FALLBACK_STATUS_CODES:
+            return True
+        if code == 400 and anthropic_error_is_billing_related(root):
+            return True
+    return _runtime_error_suggests_anthropic_billing(exc)
+
+
+def anthropic_failure_user_message(exc: BaseException) -> str:
+    """Actionable failure text when Anthropic fails and OpenRouter fallback did not run."""
+    root = _unwrap_anthropic_exception(exc)
+    msg = friendly_api_message(root if isinstance(root, BaseException) else exc, provider="anthropic")
+    if openrouter_fallback_enabled() and not openrouter_api_key_set():
+        return (
+            f"{msg} Set OPENROUTER_API_KEY for automatic fallback, "
+            "or use MDA_PROVIDER=openrouter."
+        )
+    if not openrouter_fallback_enabled():
+        return f"{msg} (MDA_OPENROUTER_FALLBACK=0 disables automatic OpenRouter fallback.)"
+    return msg
 
 
 def friendly_api_message(exc: BaseException, *, provider: ProviderName | None = None) -> str:
@@ -221,6 +307,13 @@ class RestructureClient(Protocol):
         progress_writer: Callable[[str], None] | None = None,
         max_attempts: int = 3,
     ) -> str: ...
+
+
+@dataclass
+class RestructureOutcome:
+    text: str
+    provider_used: ProviderName
+    used_openrouter_fallback: bool = False
 
 
 @dataclass
@@ -380,6 +473,21 @@ class OpenRouterClient:
         raise RuntimeError(friendly_api_message(last_exc, provider="openrouter")) from last_exc
 
 
+def _notify_fallback(
+    message: str,
+    *,
+    progress: bool,
+    progress_writer: Callable[[str], None] | None,
+    notify: Callable[[str], None] | None,
+) -> None:
+    if notify is not None:
+        notify(message)
+    elif progress_writer is not None:
+        progress_writer(f"\n{message}\n")
+    elif progress:
+        sys.stderr.write(f"\n{message}\n")
+
+
 def restructure_with_provider(
     client: RestructureClient,
     ctx: _RunContext,
@@ -389,11 +497,12 @@ def restructure_with_provider(
     content: str,
     progress: bool,
     progress_writer: Callable[[str], None] | None = None,
+    notify: Callable[[str], None] | None = None,
     max_attempts: int = 3,
-) -> str:
+) -> RestructureOutcome:
     """Call primary provider; optionally fall back to OpenRouter on Anthropic failures."""
     try:
-        return client.restructure(
+        text = client.restructure(
             model=ctx.model,
             max_tokens=max_tokens,
             system=system,
@@ -402,27 +511,38 @@ def restructure_with_provider(
             progress_writer=progress_writer,
             max_attempts=max_attempts,
         )
+        return RestructureOutcome(text=text, provider_used=ctx.provider)
     except RuntimeError as e:
         if not ctx.allow_fallback or not anthropic_error_warrants_fallback(e):
-            raise
+            raise RuntimeError(anthropic_failure_user_message(e)) from e
+        anthropic_msg = anthropic_failure_user_message(e)
         fb_model = resolve_model("openrouter", None)
         fb_client = OpenRouterClient()
-        if progress_writer is not None:
-            progress_writer(
-                f"\n[fallback] Anthropic failed; retrying via OpenRouter ({fb_model})…\n"
-            )
-        elif progress:
-            sys.stderr.write(
-                f"\n[fallback] Anthropic failed; retrying via OpenRouter ({fb_model})…\n"
-            )
-        return fb_client.restructure(
-            model=fb_model,
-            max_tokens=max_tokens,
-            system=system,
-            content=content,
+        reason = anthropic_fallback_reason(e)
+        _notify_fallback(
+            f"Anthropic failed ({reason}); retrying via OpenRouter ({fb_model})…",
             progress=progress,
             progress_writer=progress_writer,
-            max_attempts=max_attempts,
+            notify=notify,
+        )
+        try:
+            text = fb_client.restructure(
+                model=fb_model,
+                max_tokens=max_tokens,
+                system=system,
+                content=content,
+                progress=progress,
+                progress_writer=progress_writer,
+                max_attempts=max_attempts,
+            )
+        except RuntimeError as or_err:
+            or_msg = friendly_api_message(or_err, provider="openrouter")
+            combined = f"{anthropic_msg} OpenRouter retry failed: {or_msg}"
+            raise RuntimeError(combined) from or_err
+        return RestructureOutcome(
+            text=text,
+            provider_used="openrouter",
+            used_openrouter_fallback=True,
         )
 
 
@@ -461,8 +581,13 @@ def process_job_with_provider(
             bytes_in=bytes_in,
         )
 
+    def _notify(msg: str) -> None:
+        clean = msg.strip()
+        if clean:
+            _emit(f"   {clean}")
+
     try:
-        output = restructure_with_provider(
+        outcome = restructure_with_provider(
             client,
             ctx,
             max_tokens=max_tokens,
@@ -470,17 +595,28 @@ def process_job_with_provider(
             content=raw,
             progress=progress,
             progress_writer=progress_writer,
+            notify=_notify,
             max_attempts=max_attempts,
         )
     except RuntimeError as e:
-        _emit(f"   FAILED: {e}")
+        err_text = str(e)
+        _emit(f"   FAILED: {err_text}")
+        provider = ctx.provider
+        if "OpenRouter retry failed:" in err_text:
+            provider = "anthropic+openrouter"
         return JobResult(
             job=job,
             ok=False,
             action="failed",
-            error=str(e),
+            error=err_text,
             bytes_in=bytes_in,
+            provider_used=provider,
         )
+
+    if outcome.used_openrouter_fallback:
+        _emit(f"   Used OpenRouter fallback for {job.src.name}")
+
+    output = outcome.text
 
     stripped = output.strip()
     if stripped.startswith("ERROR:"):
@@ -527,4 +663,6 @@ def process_job_with_provider(
         backup_path=backup_path,
         bytes_in=bytes_in,
         bytes_out=bytes_out,
+        provider_used=outcome.provider_used,
+        used_openrouter_fallback=outcome.used_openrouter_fallback,
     )

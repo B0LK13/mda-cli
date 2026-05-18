@@ -74,14 +74,54 @@ def _system_prompt_cache_key(skill_dir: Path) -> tuple[str, float | None, float 
     return (str(sd), m_skill, m_std)
 
 
+def anthropic_error_body_text(exc: APIStatusError) -> str:
+    """Best-effort string from an Anthropic APIStatusError body (no secrets)."""
+    body = getattr(exc, "body", None)
+    if body is None:
+        return ""
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            msg = err.get("message")
+            if isinstance(msg, str):
+                return msg
+        return str(body)
+    return str(body)
+
+
+def anthropic_error_is_billing_related(exc: APIStatusError) -> bool:
+    text = anthropic_error_body_text(exc).lower()
+    if not text:
+        text = str(getattr(exc, "message", exc)).lower()
+    return any(
+        token in text
+        for token in (
+            "credit balance",
+            "credit balance is too low",
+            "insufficient",
+            "billing",
+            "purchase credits",
+            "add credits",
+            "payment",
+            "too low to access",
+        )
+    )
+
+
 def friendly_api_message(exc: BaseException) -> str:
     """Short, actionable message for common API failures (no secrets)."""
     if isinstance(exc, AuthenticationError):
-        return "API authentication failed (401). Check ANTHROPIC_API_KEY."
+        return (
+            "Anthropic authentication failed (401). Check ANTHROPIC_API_KEY, "
+            "or set OPENROUTER_API_KEY for automatic fallback."
+        )
     if isinstance(exc, PermissionDeniedError):
-        return "API permission denied. Check your API key and account access."
+        return (
+            "Anthropic permission denied (403). Check your API key and account access, "
+            "or set OPENROUTER_API_KEY for automatic fallback."
+        )
     if isinstance(exc, RateLimitError):
-        return "API rate limit (429). Wait and retry, or reduce request volume."
+        return "Anthropic rate limit (429). Wait and retry, or reduce request volume."
     if isinstance(exc, APITimeoutError):
         return (
             "Request timed out. Retry later or raise MDA_API_TIMEOUT (seconds), "
@@ -92,12 +132,25 @@ def friendly_api_message(exc: BaseException) -> str:
     if isinstance(exc, APIStatusError):
         code = getattr(exc, "status_code", None)
         if code == 401:
-            return "API authentication failed (401). Check ANTHROPIC_API_KEY."
+            return (
+                "Anthropic authentication failed (401). Check ANTHROPIC_API_KEY, "
+                "or set OPENROUTER_API_KEY for automatic fallback."
+            )
+        if code == 402:
+            return (
+                "Anthropic insufficient credits (402). Add credits at console.anthropic.com, "
+                "or set OPENROUTER_API_KEY for automatic fallback."
+            )
         if code == 429:
-            return "API rate limit (429). Wait and retry."
-        body = getattr(exc, "body", None)
+            return "Anthropic rate limit (429). Wait and retry."
+        if code == 400 and anthropic_error_is_billing_related(exc):
+            return (
+                "Anthropic billing/credits error (400). Add credits at console.anthropic.com, "
+                "or set OPENROUTER_API_KEY for automatic fallback."
+            )
+        body = anthropic_error_body_text(exc) or getattr(exc, "body", None)
         if code is not None:
-            return f"API error ({code}). {body or type(exc).__name__}"
+            return f"Anthropic API error ({code}). {body or type(exc).__name__}"
         return str(exc)
     return str(exc)
 
@@ -169,6 +222,8 @@ class JobResult:
     backup_path: Path | None = None
     bytes_in: int = 0
     bytes_out: int = 0
+    provider_used: str | None = None
+    used_openrouter_fallback: bool = False
 
 
 def warn_large_inputs(
@@ -363,8 +418,8 @@ def load_system_prompt(skill_dir: Path) -> str:
             parts.append(read_markdown_text(categories))
         else:
             sys.stderr.write(
-                "WARNING: no MDA-STANDARD.md or references/CATEGORIES.md; "
-                "system prompt is SKILL.md only.\n"
+                f"WARNING: no MDA-STANDARD.md or references/CATEGORIES.md; "
+                f"system prompt is SKILL.md only.\n"
             )
     result = "".join(parts)
     _system_prompt_cache[key] = result
