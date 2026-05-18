@@ -1,5 +1,7 @@
 # mda-cli
 
+**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md)
+
 CLI for **Markdown Document Architect (MDA)** and related bundled skills: loads `SKILL.md` and companion standards (bundled by default), calls Anthropic or OpenRouter, and writes restructured output (strips the outer fence when present).
 
 **Supported inputs:** `.md`, `.pdf`, `.docx`, `.doc` (listing only; convert to docx), `.txt` — case-insensitive. Override with `MDA_EXTENSIONS` (comma-separated, e.g. `MDA_EXTENSIONS=.md,.txt`).
