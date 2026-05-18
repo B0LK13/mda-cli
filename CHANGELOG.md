@@ -2,10 +2,24 @@
 
 ## [Unreleased]
 
-- Backup manifests: each batch run writes `~/.mda/manifests/<run_id>.json` (override with `MDA_MANIFEST_DIR`); `mda restore --list` shows runs (apply not implemented yet).
-- TUI: press **S** to cycle bundled skills (`markdown-document-architect`, `categorize-vault-notes`).
-- Docs: `docs/LOCAL-DEV.md` for local branch workflow without GitHub CI.
-- README: note that integration tests need `ANTHROPIC_API_KEY`.
+## [0.3.1]
+
+- **TUI pre-flight:** Modal before batch **P** with file count, output mode, size/token warnings, Continue/Cancel.
+- **TUI undo:** **U** restores files from the latest batch manifest `backup_path` entries (in-place runs with backups).
+- **TUI manifests:** Each **P** batch writes `~/.mda/manifests/<run_id>.json` for CLI/TUI restore.
+- **Docs:** `docs/RECOMMENDATIONS-REPORT.md` with follow-up actions and issue status.
+
+## [0.3.0]
+
+- **Restore apply:** `mda restore <run_id>` dry-run; `mda restore <run_id> --apply --yes` copies from manifest `backup_path` entries.
+- **Batch checkpoint:** `--checkpoint` copies sources to `~/.mda/checkpoints/<run_id>/` before processing (`MDA_CHECKPOINT_DIR` override).
+- **Vault scan:** `mda vault-scan <vault>` alias for `mda script scan_vault --skill categorize-vault-notes`; TUI **Shift+V** runs scan on current folder with log output.
+- **Cost warnings:** `warn_large_inputs` reports rough token budget when `--max-tokens` may be tight for the batch.
+- **TUI preview:** extraction/read errors show a prominent `EXTRACTION ERROR` banner and red metadata line.
+- **Security:** `docs/SECURITY.md` with API key rotation runbook (#24).
+- Backup manifests: each batch run writes `~/.mda/manifests/<run_id>.json`; `mda restore --list` lists runs.
+- TUI: press **S** to cycle bundled skills.
+- Docs: `docs/LOCAL-DEV.md`; README notes optional integration CI (`continue-on-error` on `main`).
 
 ## [0.2.10]
 

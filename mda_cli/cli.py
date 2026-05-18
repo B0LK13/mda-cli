@@ -9,10 +9,14 @@ from pathlib import Path
 
 from mda_cli import __version__
 from mda_cli.backup import (
+    apply_restore_operations,
+    find_manifest_path,
     list_manifest_files,
     load_manifest,
     new_run_id,
+    plan_restore_operations,
     summarize_manifest,
+    write_batch_checkpoint,
     write_batch_manifest,
 )
 from mda_cli.core import (
@@ -55,11 +59,60 @@ def run_restore_list() -> int:
         except (OSError, ValueError) as e:
             print(f"{path.name}\tERROR: {e}", file=sys.stderr)
     print(
-        "\nRestore apply is not implemented yet; copy files from backup_path entries "
-        "or use git on tracked vaults.",
+        "\nRestore: mda restore <run_id> [--apply] [--yes]  (dry-run without --apply)",
         file=sys.stderr,
     )
     return 0
+
+
+def run_restore_apply(
+    run_id: str,
+    *,
+    apply: bool,
+    yes: bool,
+) -> int:
+    """Restore files from manifest backup_path entries for one run."""
+    path = find_manifest_path(run_id)
+    if path is None:
+        print(f"ERROR: no manifest for run id {run_id!r}", file=sys.stderr)
+        return 2
+    try:
+        data = load_manifest(path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: {path}: {e}", file=sys.stderr)
+        return 2
+    ops = plan_restore_operations(data)
+    if not ops:
+        print(f"No backup_path entries in manifest {path.name}.")
+        return 0
+    dry_run = not apply
+    if apply and not yes:
+        restorable = sum(1 for o in ops if not o.skip_reason)
+        print(
+            f"About to restore {restorable} file(s) from run {data.get('run_id', run_id)}.",
+            file=sys.stderr,
+        )
+        print("Re-run with --yes to confirm.", file=sys.stderr)
+        dry_run = True
+    applied, skipped, messages = apply_restore_operations(ops, dry_run=dry_run)
+    for line in messages:
+        print(line)
+    label = "would restore" if dry_run else "restored"
+    print(f"\n{label}: {applied}; skipped: {skipped}", file=sys.stderr)
+    if apply and not yes:
+        return 2
+    return 0 if skipped == 0 or applied > 0 else 1
+
+
+def run_vault_scan(script_args: list[str]) -> int:
+    """Alias for ``mda script scan_vault`` with categorize-vault-notes skill."""
+    return run_skill_script(
+        "scan_vault",
+        script_args,
+        skill_dir_arg=None,
+        skill_id="categorize-vault-notes",
+        list_only=False,
+    )
 
 
 def run_check(
@@ -285,6 +338,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="When used with --in-place in batch mode, keep a sibling .bak copy before overwrite.",
     )
     p.add_argument(
+        "--checkpoint",
+        action="store_true",
+        help=(
+            "Before batch processing, copy each source file to "
+            "~/.mda/checkpoints/<run_id>/ (override with MDA_CHECKPOINT_DIR)."
+        ),
+    )
+    p.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -340,12 +401,25 @@ def main(argv: list[str] | None = None) -> int:
         rest = raw_argv[1:]
         if rest == ["--list"] or rest == ["-l"]:
             return run_restore_list()
-        print(
-            "Usage: mda restore --list\n"
-            "       (restore apply not implemented yet; see manifest backup_path entries)",
-            file=sys.stderr,
-        )
-        return 2
+        apply = "--apply" in rest
+        yes = "--yes" in rest
+        positional = [t for t in rest if t not in ("--apply", "--yes")]
+        if len(positional) != 1:
+            print(
+                "Usage: mda restore --list\n"
+                "       mda restore <run_id>              # dry-run restore plan\n"
+                "       mda restore <run_id> --apply --yes  # copy from backup_path",
+                file=sys.stderr,
+            )
+            return 2
+        return run_restore_apply(positional[0], apply=apply, yes=yes)
+
+    if raw_argv and raw_argv[0] in ("vault-scan", "vault_scan"):
+        args = _parse_script_argv(raw_argv[1:])
+        script_args = list(args.script_args)
+        if script_args and script_args[0] == "--":
+            script_args = script_args[1:]
+        return run_vault_scan(script_args)
 
     if raw_argv and raw_argv[0] == "script":
         args = _parse_script_argv(raw_argv[1:])
@@ -440,7 +514,17 @@ def main(argv: list[str] | None = None) -> int:
     provider = resolve_provider_name(cli_provider=args.provider)
     ensure_api_credentials(provider)
 
-    warn_large_inputs(jobs)
+    warn_large_inputs(jobs, max_tokens=args.max_tokens)
+
+    run_id = new_run_id()
+    if args.checkpoint:
+        checkpoint_root = write_batch_checkpoint(
+            run_id=run_id,
+            jobs=jobs,
+            base=args.target if args.target.is_dir() else args.target.parent,
+        )
+        if not args.json_lines:
+            print(f"Checkpoint: {checkpoint_root}", file=sys.stderr)
 
     system = load_system_prompt(skill_dir)
     client, ctx = build_restructure_client(
@@ -481,7 +565,6 @@ def main(argv: list[str] | None = None) -> int:
                     job_result_record(failed, provider=ctx.provider),
                 )
 
-    run_id = new_run_id()
     manifest_path = write_batch_manifest(
         run_id=run_id,
         results=results,
