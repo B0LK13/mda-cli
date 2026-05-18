@@ -52,6 +52,31 @@ def test_format_preview_metadata(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tui_preview_body_not_focusable(skill_dir: Path, tmp_path: Path) -> None:
+    from textual.widgets import TextArea
+
+    from mda_cli.tui import MdaNavigatorApp
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "one.md").write_text("# One", encoding="utf-8")
+
+    app = MdaNavigatorApp(
+        start=docs,
+        skill_dir=skill_dir,
+        model="claude-sonnet-4-20250514",
+        max_tokens=100,
+    )
+    async with app.run_test() as pilot:
+        preview = app.query_one("#preview-body", TextArea)
+        assert preview.can_focus is False
+        await pilot.press("down")
+        await pilot.press("space")
+        assert app.selected
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
 async def test_tui_highlight_updates_preview(skill_dir: Path, tmp_path: Path) -> None:
     from textual.widgets import TextArea
 

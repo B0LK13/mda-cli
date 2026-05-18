@@ -216,6 +216,7 @@ class MdaNavigatorApp(App[None]):
         self.selected: set[Path] = set()
         self.output_mode: str = "sibling"  # sibling | in_place | out_dir
         self._rows: list[tuple[Path | None, str]] = []
+        self._row_key_meta: dict[object, tuple[Path | None, str]] = {}
         self._selectable_row_keys: dict[Path, object] = {}
         self._row_key_seq = 0
         self._col_name_key: object | None = None
@@ -266,6 +267,7 @@ class MdaNavigatorApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one("#preview-body", TextArea).can_focus = False
         table = self.query_one("#listing", DataTable)
         name_k, _kind_k = table.add_columns(("Name", "name"), ("Kind", "kind"))
         self._col_name_key = name_k
@@ -281,27 +283,54 @@ class MdaNavigatorApp(App[None]):
         )
         self._apply_preview_pane_visibility()
 
-    def on_key(self, event: events.Key) -> None:
-        """Route navigation keys to the file listing; DataTable swallows them otherwise."""
+    def _listing_table(self) -> DataTable:
+        return self.query_one("#listing", DataTable)
+
+    def _listing_accepts_browser_keys(self) -> DataTable | None:
+        """Return the listing when browser keys should apply (not the out-dir field)."""
         focused = self.focused
         if focused is None:
-            return
-        try:
-            listing = self.query_one("#listing", DataTable)
-        except Exception:
-            return
-        if focused is not listing:
+            return None
+        if focused.id == "out-dir":
+            return None
+        listing = self._listing_table()
+        if focused is listing:
+            return listing
+        label_ids = {
+            "path-label",
+            "selection-label",
+            "mode-label",
+            "skill-label",
+            "filter-label",
+        }
+        if focused.id in label_ids:
+            return listing
+        return None
+
+    def _focus_listing_for_browser_keys(self) -> DataTable:
+        listing = self._listing_table()
+        if self.focused is not listing:
+            listing.focus()
+        return listing
+
+    def on_key(self, event: events.Key) -> None:
+        """Route navigation keys to the file listing; DataTable swallows them otherwise."""
+        listing = self._listing_accepts_browser_keys()
+        if listing is None:
             return
 
         if event.key == "enter":
+            self._focus_listing_for_browser_keys()
             self.action_activate()
             event.prevent_default()
             event.stop()
         elif event.key == "space":
+            self._focus_listing_for_browser_keys()
             self.action_toggle_select()
             event.prevent_default()
             event.stop()
         elif event.key == "backspace":
+            self._focus_listing_for_browser_keys()
             self.action_go_up()
             event.prevent_default()
             event.stop()
@@ -317,7 +346,7 @@ class MdaNavigatorApp(App[None]):
             self._schedule_preview_update()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id != "listing":
+        if event.control.id != "listing":
             return
         self._schedule_preview_update()
 
@@ -387,9 +416,12 @@ class MdaNavigatorApp(App[None]):
         if w is not None and hasattr(w, "id") and w.id is not None:
             prev_focus_id = str(w.id)
 
-        table = self.query_one("#listing", DataTable)
+        preserve_path = self._highlighted_preview_path()
+
+        table = self._listing_table()
         table.clear()
         self._rows.clear()
+        self._row_key_meta.clear()
         self._selectable_row_keys.clear()
 
         self.query_one("#path-label", Label).update(str(self.cwd))
@@ -417,12 +449,16 @@ class MdaNavigatorApp(App[None]):
         dirs = [p for p in dirs if self._path_visible(p, is_dir=True)]
         files = [p for p in files if self._path_visible(p, is_dir=False)]
 
-        table.add_row("..", "parent", key=self._alloc_row_key())
+        up_key = self._alloc_row_key()
+        table.add_row("..", "parent", key=up_key)
         self._rows.append((self.cwd.parent, "up"))
+        self._row_key_meta[up_key] = (self.cwd.parent, "up")
 
         for p in dirs:
-            table.add_row(f"{p.name}/", "dir", key=self._alloc_row_key())
+            dir_key = self._alloc_row_key()
+            table.add_row(f"{p.name}/", "dir", key=dir_key)
             self._rows.append((p, "dir"))
+            self._row_key_meta[dir_key] = (p, "dir")
 
         for p in files:
             selectable = is_supported_extension(p)
@@ -431,17 +467,33 @@ class MdaNavigatorApp(App[None]):
                 kind = "file"
             pr = p.resolve()
             mark = "* " if pr in self.selected else ""
-            rk = table.add_row(f"{mark}{p.name}", kind, key=self._alloc_row_key())
+            file_key = self._alloc_row_key()
+            table.add_row(f"{mark}{p.name}", kind, key=file_key)
             row_kind = kind if selectable else "file"
             self._rows.append((pr, row_kind))
+            self._row_key_meta[file_key] = (pr, row_kind)
             if selectable:
-                self._selectable_row_keys[pr] = rk
+                self._selectable_row_keys[pr] = file_key
 
         if prev_focus_id == "out-dir":
             self.query_one("#out-dir", Input).focus()
         else:
-            self.query_one("#listing", DataTable).focus()
-        self._schedule_preview_update()
+            table.focus()
+        self._restore_listing_cursor(preserve_path)
+        self.call_after_refresh(self._schedule_preview_update)
+
+    def _restore_listing_cursor(self, path: Path | None) -> None:
+        if path is None:
+            return
+        table = self._listing_table()
+        row_key = self._selectable_row_keys.get(path.resolve())
+        if row_key is None:
+            return
+        try:
+            row_index = table.get_row_index(row_key)
+        except Exception:
+            return
+        table.move_cursor(row=row_index, column=0)
 
     def _apply_preview_pane_visibility(self) -> None:
         col = self.query_one("#preview-col")
@@ -462,16 +514,37 @@ class MdaNavigatorApp(App[None]):
         self.query_one("#preview-meta", Label).update("")
         self.query_one("#preview-body", TextArea).load_text("")
 
-    def _highlighted_preview_path(self) -> Path | None:
-        idx = self._cursor_row_index()
-        if idx is None:
+    def _meta_for_row_key(self, row_key: object) -> tuple[Path | None, str] | None:
+        return self._row_key_meta.get(row_key)
+
+    def _cursor_row_meta(self) -> tuple[Path | None, str] | None:
+        table = self._listing_table()
+        coord = table.cursor_coordinate
+        if coord is None:
             return None
-        path, kind = self._rows[idx]
-        if path is None or kind in ("up", "dir"):
+        try:
+            cell_key = table.coordinate_to_cell_key(coord)
+        except Exception:
+            row = coord.row
+            if row < 0 or row >= len(self._rows):
+                return None
+            return self._rows[row]
+        return self._row_key_meta.get(cell_key.row_key)
+
+    def _preview_path_from_meta(
+        self, meta: tuple[Path | None, str] | None
+    ) -> Path | None:
+        if meta is None:
+            return None
+        path, kind = meta
+        if path is None or kind in ("up", "dir", "parent"):
             return None
         if not is_supported_extension(path):
             return None
         return path
+
+    def _highlighted_preview_path(self) -> Path | None:
+        return self._preview_path_from_meta(self._cursor_row_meta())
 
     def _schedule_preview_update(self) -> None:
         if not self.show_preview_pane:
@@ -560,12 +633,12 @@ class MdaNavigatorApp(App[None]):
         rk = self._selectable_row_keys.get(path)
         if rk is None:
             return
-        table = self.query_one("#listing", DataTable)
+        table = self._listing_table()
         mark = "* " if path in self.selected else ""
         table.update_cell(rk, self._col_name_key, f"{mark}{path.name}")
 
     def _cursor_row_index(self) -> int | None:
-        table = self.query_one("#listing", DataTable)
+        table = self._listing_table()
         coord = table.cursor_coordinate
         if coord is None:
             return None
@@ -634,10 +707,10 @@ class MdaNavigatorApp(App[None]):
         self.refresh_listing()
 
     def action_activate(self) -> None:
-        idx = self._cursor_row_index()
-        if idx is None:
+        meta = self._cursor_row_meta()
+        if meta is None:
             return
-        path, kind = self._rows[idx]
+        path, kind = meta
         if path is None:
             return
         if kind == "up":
@@ -648,10 +721,10 @@ class MdaNavigatorApp(App[None]):
             self.refresh_listing()
 
     def action_toggle_select(self) -> None:
-        idx = self._cursor_row_index()
-        if idx is None:
+        meta = self._cursor_row_meta()
+        if meta is None:
             return
-        path, kind = self._rows[idx]
+        path, _kind = meta
         if path is None or not is_supported_extension(path):
             return
         if path in self.selected:

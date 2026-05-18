@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.3.3]
+
+- **TUI:** Fix file preview on row highlight and Space selection for all supported extensions (`.md`, `.txt`, `.pdf`, `.docx`, etc.). Row keys are tracked reliably after listing refresh; preview pane no longer steals keyboard focus; cursor restores to the highlighted file after filter/hidden toggles.
+
 ## [0.3.2]
 
 - **TUI folder picker:** **D** shows disks/volumes (Windows drive letters; `/`, `/mnt/*`, and common mount roots on Linux/WSL). Disks also appear above `..` when browsing a volume root.

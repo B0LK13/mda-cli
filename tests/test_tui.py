@@ -188,6 +188,55 @@ async def test_tui_filter_via_binding(skill_dir: Path, tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tui_space_toggles_txt_without_star_refresh(skill_dir: Path, tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    note = docs / "note.txt"
+    note.write_text("hello txt", encoding="utf-8")
+
+    app = MdaNavigatorApp(
+        start=docs,
+        skill_dir=skill_dir,
+        model="claude-sonnet-4-20250514",
+        max_tokens=100,
+    )
+    async with app.run_test() as pilot:
+        await pilot.press("down")  # .. -> note.txt
+        await pilot.press("space")
+        assert app.selected == {note.resolve()}
+        table = app.query_one("#listing")
+        row_key = app._selectable_row_keys[note.resolve()]
+        name_cell = table.get_cell(row_key, app._col_name_key)
+        assert str(name_cell).startswith("*")
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_tui_refresh_keeps_highlighted_preview(skill_dir: Path, tmp_path: Path) -> None:
+    from textual.widgets import TextArea
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    sample = docs / "sample.md"
+    sample.write_text("# Keep me\n", encoding="utf-8")
+
+    app = MdaNavigatorApp(
+        start=docs,
+        skill_dir=skill_dir,
+        model="claude-sonnet-4-20250514",
+        max_tokens=100,
+    )
+    async with app.run_test() as pilot:
+        await pilot.press("down")
+        await pilot.pause(delay=0.25)
+        app.action_toggle_hidden()
+        await pilot.pause(delay=0.25)
+        preview = app.query_one("#preview-body", TextArea)
+        assert "Keep me" in preview.text
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
 async def test_tui_start_file_uses_parent(skill_dir: Path, tmp_path: Path) -> None:
     f = tmp_path / "x.md"
     f.write_text("# X", encoding="utf-8")
