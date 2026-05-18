@@ -171,7 +171,12 @@ class JobResult:
     bytes_out: int = 0
 
 
-def warn_large_inputs(jobs: list[Job], *, writer: Callable[[str], None] | None = None) -> None:
+def warn_large_inputs(
+    jobs: list[Job],
+    *,
+    max_tokens: int | None = None,
+    writer: Callable[[str], None] | None = None,
+) -> None:
     """Warn when inputs may stress context limits (heuristic by file size)."""
     emit = writer or (lambda m: sys.stderr.write(m + "\n"))
     total = 0
@@ -191,6 +196,24 @@ def warn_large_inputs(jobs: list[Job], *, writer: Callable[[str], None] | None =
             f"WARNING: batch input is large (~{total // 1024} KiB total); "
             "watch for context or rate limits."
         )
+    if max_tokens is not None and max_tokens > 0 and jobs:
+        # Rough input token estimate (~4 chars/token); output capped per file by max_tokens.
+        est_input_tokens = max(1, total // 4)
+        est_output_tokens = max_tokens * len(jobs)
+        est_total = est_input_tokens + est_output_tokens
+        per_file_budget = max_tokens
+        if est_input_tokens > per_file_budget * len(jobs):
+            emit(
+                f"WARNING: estimated input tokens (~{est_input_tokens:,}) may exceed "
+                f"--max-tokens ({per_file_budget:,}) per file for {len(jobs)} job(s); "
+                "reduce batch size or raise --max-tokens."
+            )
+        if est_total > 200_000:
+            emit(
+                f"WARNING: rough token budget ~{est_total:,} "
+                f"(input ~{est_input_tokens:,} + output up to {est_output_tokens:,}); "
+                "use --max-files, --max-tokens, or a dry-run first."
+            )
 
 
 def bundled_skills_root() -> Path:

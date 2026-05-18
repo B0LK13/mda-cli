@@ -46,6 +46,11 @@ def format_preview_metadata(
     return base
 
 
+def format_preview_error_banner(error: str) -> str:
+    """Prominent extraction/read error text for the preview body."""
+    return f"EXTRACTION ERROR\n{'=' * 16}\n{error}"
+
+
 def format_preview_display(
     *,
     metadata: str,

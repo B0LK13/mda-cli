@@ -1,6 +1,6 @@
 # mda-cli
 
-**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **Gap analysis:** [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) · **Recommendations:** [docs/RECOMMENDATIONS.md](docs/RECOMMENDATIONS.md) · **Vault playbook:** [docs/VAULT-PLAYBOOK.md](docs/VAULT-PLAYBOOK.md) · **Troubleshooting:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) ([tracked issues](https://github.com/B0LK13/mda-cli/issues))
+**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **Gap analysis:** [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) · **Recommendations:** [docs/RECOMMENDATIONS.md](docs/RECOMMENDATIONS.md) · **Status report:** [docs/RECOMMENDATIONS-REPORT.md](docs/RECOMMENDATIONS-REPORT.md) · **Vault playbook:** [docs/VAULT-PLAYBOOK.md](docs/VAULT-PLAYBOOK.md) · **Troubleshooting:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · **Security:** [docs/SECURITY.md](docs/SECURITY.md) ([tracked issues](https://github.com/B0LK13/mda-cli/issues))
 
 CLI for **Markdown Document Architect (MDA)** and related bundled skills: loads `SKILL.md` and companion standards (bundled by default), calls Anthropic or OpenRouter, and writes restructured output (strips the outer fence when present).
 
@@ -106,9 +106,16 @@ mda path\to\file.md
 mda path\to\vault -r --max-files 10 -q
 mda path\to\vault --dry-run
 mda path\to\file.md --in-place --backup
+mda path\to\vault -r --checkpoint --max-files 10
+mda restore --list
+mda restore 20260101T120000Z
+mda restore 20260101T120000Z --apply --yes
+mda vault-scan E:\ObsidianVault7 --recursive
 ```
 
-Optional environment variables: `MDA_SKILL` (skill id), `MDA_SKILL_DIR` (explicit skill folder), `MDA_EXTENSIONS`, `MDA_MODEL`, `MDA_MAX_TOKENS`, `MDA_API_TIMEOUT`. See [.env.example](.env.example) for a full template.
+Optional environment variables: `MDA_SKILL` (skill id), `MDA_SKILL_DIR` (explicit skill folder), `MDA_EXTENSIONS`, `MDA_MODEL`, `MDA_MAX_TOKENS`, `MDA_API_TIMEOUT`, `MDA_MANIFEST_DIR`, `MDA_CHECKPOINT_DIR`. See [.env.example](.env.example) for a full template.
+
+**CI:** Unit tests and smoke install run on every push/PR. An optional integration job on `main` runs live API tests when `ANTHROPIC_API_KEY` is set; it uses `continue-on-error: true` so billing or missing secrets do not block releases.
 
 ### Cost guardrails
 
@@ -128,7 +135,7 @@ mda E:\ObsidianVault7 -r --max-files 5 -q
 mda E:\ObsidianVault7 -r --max-files 20 --max-tokens 4096
 ```
 
-TUI: select a small set of files manually before pressing **P**. See [docs/VAULT-PLAYBOOK.md](docs/VAULT-PLAYBOOK.md).
+TUI: select a small set of files manually before pressing **P** (pre-flight confirmation with token/size warnings). After an in-place batch, press **U** to undo from the latest manifest backups. See [docs/VAULT-PLAYBOOK.md](docs/VAULT-PLAYBOOK.md).
 
 **Output naming:** sibling `*.restructured.md` for the default MDA skill (including PDF/DOCX sources). The `categorize-vault-notes` skill writes `*.restructured.txt` for non-Markdown sources.
 
@@ -136,6 +143,8 @@ TUI: select a small set of files manually before pressing **P**. See [docs/VAULT
 
 - `--in-place` overwrites the source file.
 - `--backup` is available only with `--in-place` in batch mode and writes a sibling backup before replacing the file.
+- `--checkpoint` copies each source file under `~/.mda/checkpoints/<run_id>/` before the batch starts (separate from per-file `.bak` backups).
+- Each batch writes a manifest under `~/.mda/manifests/`; use `mda restore --list` and `mda restore <run_id> --apply --yes` to roll back from `backup_path` entries.
 - Generated outputs are written atomically. If the process fails during write, the original destination file is left in place.
 - `--json-lines` now includes `action`, `changed`, `bytes_in`, `bytes_out`, and `backup_path` fields.
 
@@ -158,6 +167,7 @@ Assign YAML frontmatter and optional folder hints for Obsidian vaults (flat or n
 mda --skill categorize-vault-notes E:\ObsidianVault7\note.md
 mda script --list --skill categorize-vault-notes
 mda script scan_vault --skill categorize-vault-notes -- E:\ObsidianVault7 --limit 20
+mda vault-scan E:\ObsidianVault7 --recursive --limit 20
 mda script plan_moves --skill categorize-vault-notes -- E:\ObsidianVault7
 mda script plan_moves --skill categorize-vault-notes -- E:\ObsidianVault7 --apply
 ```

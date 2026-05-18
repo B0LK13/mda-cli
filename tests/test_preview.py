@@ -7,6 +7,7 @@ import pytest
 from mda_cli.preview import (
     DEFAULT_PREVIEW_MAX_CHARS,
     format_preview_display,
+    format_preview_error_banner,
     format_preview_metadata,
     truncate_preview_text,
 )
@@ -34,6 +35,12 @@ def test_format_preview_display_empty() -> None:
 def test_format_preview_display_truncated() -> None:
     text = format_preview_display(metadata="m", body="abc", truncated=True)
     assert "… truncated" in text
+
+
+def test_format_preview_error_banner() -> None:
+    text = format_preview_error_banner("PDF extra not installed")
+    assert "EXTRACTION ERROR" in text
+    assert "PDF extra not installed" in text
 
 
 def test_format_preview_metadata(tmp_path: Path) -> None:

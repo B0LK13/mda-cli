@@ -11,10 +11,16 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Header, Input, Label, RichLog, TextArea
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, TextArea
 
+from mda_cli.backup import (
+    new_run_id,
+    restore_from_manifest,
+    write_batch_manifest,
+)
 from mda_cli.core import (
     Job,
+    JobResult,
     find_skill_dir,
     jobs_from_document_files,
     list_bundled_skills,
@@ -26,8 +32,10 @@ from mda_cli.document_io import (
     read_document_text,
     supported_extensions,
 )
+from mda_cli.preflight import build_batch_preflight, format_preflight_message
 from mda_cli.preview import (
     DEFAULT_PREVIEW_MAX_CHARS,
+    format_preview_error_banner,
     format_preview_metadata,
     truncate_preview_text,
 )
@@ -84,6 +92,42 @@ class JumpPathScreen(ModalScreen[Path | None]):
         self.dismiss(p.resolve())
 
 
+class BatchPreflightScreen(ModalScreen[bool]):
+    """Confirm batch run after showing file count and token/size warnings."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("n", "cancel", "Cancel", show=False),
+        Binding("y", "continue_run", "Continue", show=False),
+    ]
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        yield Label("Batch pre-flight", id="preflight-title")
+        yield Label(self.message, id="preflight-body")
+        with Horizontal(id="preflight-actions"):
+            yield Button("Continue", variant="primary", id="preflight-continue")
+            yield Button("Cancel", id="preflight-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#preflight-continue", Button).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def action_continue_run(self) -> None:
+        self.dismiss(True)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "preflight-continue":
+            self.dismiss(True)
+        elif event.button.id == "preflight-cancel":
+            self.dismiss(False)
+
+
 class FilterScreen(ModalScreen[str | None]):
     """Filter listing by substring (case-insensitive); empty clears filter."""
 
@@ -122,6 +166,7 @@ class MdaNavigatorApp(App[None]):
     #right { width: 1fr; height: 100%; border: heavy $primary; padding: 0 1; }
     #listing { height: 1fr; min-height: 10; }
     #preview-meta { height: auto; max-height: 3; text-style: bold; }
+    #preview-meta.error { color: $error; }
     #preview-body { height: 1fr; min-height: 8; }
     #log { height: 1fr; min-height: 10; background: $surface; }
     #api-status { height: auto; max-height: 3; color: $error; }
@@ -134,6 +179,7 @@ class MdaNavigatorApp(App[None]):
         Binding("o", "cycle_output", "Output mode", show=True),
         Binding("i", "toggle_preview", "Preview", show=True),
         Binding("p", "run_mda", "Run MDA", show=True),
+        Binding("u", "undo_last", "Undo batch", show=True),
         Binding("g", "focus_out_dir", "Out folder", show=True),
         Binding("h", "go_home", "Home", show=True),
         Binding("ctrl+j", "jump_path", "Jump", show=True),
@@ -141,6 +187,7 @@ class MdaNavigatorApp(App[None]):
         Binding("v", "toggle_hidden", "Hidden", show=True),
         Binding("a", "select_recursive_supported", "Recursive all", show=True),
         Binding("s", "cycle_skill", "Skill", show=True),
+        Binding("shift+v", "scan_vault", "Vault scan", show=True),
     ]
 
     def __init__(
@@ -179,6 +226,8 @@ class MdaNavigatorApp(App[None]):
         self._preview_timer = None
         self._preview_load_id: int = 0
         self._last_api_error: str | None = None
+        self._last_manifest_path: Path | None = None
+        self._recursive_last_select: bool = False
         bundled = list_bundled_skills()
         self._skill_cycle_ids: list[str] = bundled if bundled else []
         if self.skill_id and self.skill_id not in self._skill_cycle_ids:
@@ -226,9 +275,9 @@ class MdaNavigatorApp(App[None]):
             f"[dim]Supported:[/] {exts}\n"
             "[dim]Space[/] toggle file  [dim]Enter[/] open dir  [dim]Backspace[/] up  "
             "[dim]ctrl+j[/] jump  [dim]f[/] filter  [dim]v[/] hidden  "
-            "[dim]a[/] recursive select  [dim]S[/] skill  [dim]k/j[/] up/down  "
-            "[dim]I[/] preview pane  [dim]O[/] output  [dim]P[/] run  "
-            "[dim]G[/] out-folder  [dim]H[/] home"
+            "[dim]a[/] recursive select  [dim]S[/] skill  [dim]Shift+V[/] vault scan  "
+            "[dim]k/j[/] up/down  [dim]I[/] preview  [dim]O[/] output  [dim]P[/] run  "
+            "[dim]U[/] undo last batch  [dim]G[/] out-folder  [dim]H[/] home"
         )
         self._apply_preview_pane_visibility()
 
@@ -485,17 +534,23 @@ class MdaNavigatorApp(App[None]):
         *,
         truncated: bool,
     ) -> None:
+        meta_label = self.query_one("#preview-meta", Label)
         meta = format_preview_metadata(path, error=error)
-        self.query_one("#preview-meta", Label).update(meta)
         if error:
-            text = error if not body else f"{error}\n\n{body}"
+            meta_label.add_class("error")
+            meta_label.update(f"[red]{meta}[/]")
+        else:
+            meta_label.remove_class("error")
+            meta_label.update(meta)
+        if error:
+            text = format_preview_error_banner(error)
+            if body:
+                text = f"{text}\n\n--- partial content ---\n{body}"
         elif body == "":
             text = "(empty)"
         else:
             text = body
-        if truncated and not error:
-            text = f"{text}\n\n… truncated"
-        elif truncated:
+        if truncated:
             text = f"{text}\n\n… truncated"
         self.query_one("#preview-body", TextArea).load_text(text)
 
@@ -574,6 +629,7 @@ class MdaNavigatorApp(App[None]):
             found = found[:cap]
         else:
             self.log_msg(f"[cyan]Recursive select:[/] {len(found)} file(s) under {self.cwd}")
+        self._recursive_last_select = True
         self.selected.update(found)
         self.refresh_listing()
 
@@ -620,10 +676,56 @@ class MdaNavigatorApp(App[None]):
         self.query_one("#skill-label", Label).update(self._skill_label())
         self.log_msg(f"[cyan]Skill set to[/] {self.skill_id}")
 
+    @work
+    async def action_scan_vault(self) -> None:
+        """Run categorize-vault-notes ``scan_vault`` on the current folder."""
+        import io
+        import sys
+
+        from mda_cli.cli import run_skill_script
+
+        vault = self.cwd
+        self.log_msg(f"[cyan]Vault scan[/] {vault} (recursive)…")
+
+        def run_scan() -> int:
+            buf = io.StringIO()
+            old_out = sys.stdout
+            sys.stdout = buf
+            try:
+                code = run_skill_script(
+                    "scan_vault",
+                    [str(vault), "--recursive"],
+                    skill_dir_arg=None,
+                    skill_id="categorize-vault-notes",
+                    list_only=False,
+                )
+            finally:
+                sys.stdout = old_out
+            return code, buf.getvalue()
+
+        code, output = await asyncio.to_thread(run_scan)
+        lines = [ln for ln in output.strip().splitlines() if ln.strip()]
+        preview = lines[:40]
+        for line in preview:
+            self.log_msg(f"[dim]{line}[/]")
+        if len(lines) > len(preview):
+            self.log_msg(f"[dim]… {len(lines) - len(preview)} more line(s)[/]")
+        if code != 0:
+            self.log_msg("[red]Vault scan failed.[/]")
+        else:
+            self.log_msg("[green]Vault scan complete.[/]")
+
     def action_focus_out_dir(self) -> None:
         self.query_one("#out-dir", Input).focus()
 
-    def _run_batch_sync(self, skill_dir: Path, jobs: list[Job]) -> None:
+    def _run_batch_sync(
+        self,
+        skill_dir: Path,
+        jobs: list[Job],
+        *,
+        backup_in_place: bool,
+        skill_id: str,
+    ) -> tuple[list[JobResult], Path]:
         def thread_log(msg: str) -> None:
             self.call_from_thread(self.log_msg, msg)
 
@@ -633,7 +735,7 @@ class MdaNavigatorApp(App[None]):
             model=self.model,
             max_tokens=self.max_tokens,
         )
-        ok = 0
+        results: list[JobResult] = []
         total = len(jobs)
         self.call_from_thread(self._set_api_error, None)
         for index, job in enumerate(jobs, start=1):
@@ -649,10 +751,10 @@ class MdaNavigatorApp(App[None]):
                     progress=False,
                     log=thread_log,
                     max_attempts=self.max_attempts,
+                    backup_in_place=backup_in_place,
                 )
-                if result.ok:
-                    ok += 1
-                else:
+                results.append(result)
+                if not result.ok:
                     err = result.error or "processing failed"
                     self.call_from_thread(self._set_api_error, err)
                     thread_log(f"[red]FAILED[/] {job.src}: {err}")
@@ -660,12 +762,61 @@ class MdaNavigatorApp(App[None]):
                 err = str(e)
                 self.call_from_thread(self._set_api_error, err)
                 thread_log(f"[red]FAILED[/] {job.src}: {e}")
+                results.append(
+                    JobResult(job=job, ok=False, action="failed", error=err),
+                )
         self.call_from_thread(
             self.query_one("#selection-label", Label).update,
             self._selection_label(),
         )
+        ok = sum(1 for r in results if r.ok)
         thread_log(f"[bold]Done.[/] {ok}/{total} succeeded.")
+        run_id = new_run_id()
+        manifest_path = write_batch_manifest(
+            run_id=run_id,
+            results=results,
+            skill_id=skill_id,
+            provider=ctx.provider,
+            target=self.cwd,
+            in_place=backup_in_place,
+            backup_enabled=backup_in_place,
+        )
+        thread_log(f"[dim]Manifest:[/] {manifest_path}")
+        return results, manifest_path
 
+    def _output_mode_label(self) -> str:
+        if self.output_mode == "sibling":
+            return "sibling (*.restructured.md)"
+        if self.output_mode == "in_place":
+            return "in-place (overwrite source)"
+        return "out_dir"
+
+    @work
+    async def action_undo_last(self) -> None:
+        manifest_path = self._last_manifest_path
+        if manifest_path is None or not manifest_path.is_file():
+            self.log_msg(
+                "[yellow]Nothing to undo.[/] Run a batch with **P** first "
+                "(in-place mode keeps backups for undo)."
+            )
+            return
+
+        def do_restore() -> tuple[int, int, list[str], str | None]:
+            return restore_from_manifest(manifest_path, dry_run=False)
+
+        applied, skipped, messages, error = await asyncio.to_thread(do_restore)
+        if error:
+            self.log_msg(f"[red]Undo failed:[/] {error}")
+            return
+        for line in messages[:20]:
+            self.log_msg(f"[dim]{line}[/]")
+        if len(messages) > 20:
+            self.log_msg(f"[dim]… {len(messages) - 20} more line(s)[/]")
+        self.log_msg(
+            f"[green]Undo complete.[/] Restored {applied} file(s); skipped {skipped}."
+        )
+
+    @work
     async def action_run_mda(self) -> None:
         if not self.selected:
             self.log_msg(
@@ -714,11 +865,34 @@ class MdaNavigatorApp(App[None]):
             self.log_msg(f"[red]{e}[/]")
             return
 
+        preflight = build_batch_preflight(
+            jobs,
+            max_tokens=self.max_tokens,
+            output_mode=self._output_mode_label(),
+        )
+        preflight_body = format_preflight_message(preflight)
+        if self._recursive_last_select:
+            preflight_body = (
+                f"Recursive selection under: {self.cwd}\n\n{preflight_body}"
+            )
+        confirmed = await self.push_screen_wait(BatchPreflightScreen(preflight_body))
+        if not confirmed:
+            self.log_msg("[yellow]Batch cancelled.[/]")
+            return
+
         self.log_msg(f"[cyan]Skill:[/] {skill_res.skill_id} ({skill_dir})")
         for j in jobs:
             self.log_msg(f"[dim]{j.src} → {j.dst}[/]")
 
-        await asyncio.to_thread(self._run_batch_sync, skill_dir, jobs)
+        backup_in_place = in_place
+        _results, manifest_path = await asyncio.to_thread(
+            self._run_batch_sync,
+            skill_dir,
+            jobs,
+            backup_in_place=backup_in_place,
+            skill_id=skill_res.skill_id,
+        )
+        self._last_manifest_path = manifest_path
 
 
 def run_tui(
