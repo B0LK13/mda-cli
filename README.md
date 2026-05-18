@@ -1,6 +1,6 @@
 # mda-cli
 
-**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **Gap analysis:** [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) ([tracked issues](https://github.com/B0LK13/mda-cli/issues))
+**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **Implementation plan:** [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md) · **Gap analysis:** [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) ([tracked issues](https://github.com/B0LK13/mda-cli/issues))
 
 CLI for **Markdown Document Architect (MDA)** and related bundled skills: loads `SKILL.md` and companion standards (bundled by default), calls Anthropic or OpenRouter, and writes restructured output (strips the outer fence when present).
 
