@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+- Backup manifests: each batch run writes `~/.mda/manifests/<run_id>.json` (override with `MDA_MANIFEST_DIR`); `mda restore --list` shows runs (apply not implemented yet).
+- TUI: press **S** to cycle bundled skills (`markdown-document-architect`, `categorize-vault-notes`).
+- Docs: `docs/LOCAL-DEV.md` for local branch workflow without GitHub CI.
+- README: note that integration tests need `ANTHROPIC_API_KEY`.
+
 ## [0.2.10]
 
 - GitHub Actions: ruff + unit pytest on push/PR; optional integration job on `main`.

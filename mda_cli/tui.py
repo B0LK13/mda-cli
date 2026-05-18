@@ -13,13 +13,14 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, RichLog, TextArea
 
-from mda_cli.core import Job, find_skill_dir, jobs_from_document_files, load_system_prompt
-from mda_cli.document_io import (
-    DocumentReadError,
-    is_supported_extension,
-    read_document_text,
-    supported_extensions,
+from mda_cli.core import (
+    Job,
+    find_skill_dir,
+    jobs_from_document_files,
+    list_bundled_skills,
+    load_system_prompt,
 )
+from mda_cli.document_io import DocumentReadError, is_supported_extension, read_document_text, supported_extensions
 from mda_cli.preview import (
     DEFAULT_PREVIEW_MAX_CHARS,
     format_preview_metadata,
@@ -134,6 +135,7 @@ class MdaNavigatorApp(App[None]):
         Binding("f", "filter_listing", "Filter", show=True),
         Binding("v", "toggle_hidden", "Hidden", show=True),
         Binding("a", "select_recursive_supported", "Recursive all", show=True),
+        Binding("s", "cycle_skill", "Skill", show=True),
     ]
 
     def __init__(
@@ -172,6 +174,15 @@ class MdaNavigatorApp(App[None]):
         self._preview_timer = None
         self._preview_load_id: int = 0
         self._last_api_error: str | None = None
+        bundled = list_bundled_skills()
+        self._skill_cycle_ids: list[str] = bundled if bundled else []
+        if self.skill_id and self.skill_id not in self._skill_cycle_ids:
+            self._skill_cycle_ids = [self.skill_id, *self._skill_cycle_ids]
+        elif not self._skill_cycle_ids and self.skill_id:
+            self._skill_cycle_ids = [self.skill_id]
+        self._skill_cycle_index = 0
+        if self.skill_id and self.skill_id in self._skill_cycle_ids:
+            self._skill_cycle_index = self._skill_cycle_ids.index(self.skill_id)
 
     def _alloc_row_key(self) -> str:
         self._row_key_seq += 1
@@ -185,6 +196,7 @@ class MdaNavigatorApp(App[None]):
                 yield DataTable(id="listing", zebra_stripes=True, cursor_type="row")
                 yield Label(id="selection-label")
                 yield Label(id="mode-label")
+                yield Label(id="skill-label")
                 yield Label(id="filter-label")
                 yield Input(
                     placeholder="Output folder when mode is out_dir (absolute or ~)",
@@ -209,8 +221,9 @@ class MdaNavigatorApp(App[None]):
             f"[dim]Supported:[/] {exts}\n"
             "[dim]Space[/] toggle file  [dim]Enter[/] open dir  [dim]Backspace[/] up  "
             "[dim]ctrl+j[/] jump  [dim]f[/] filter  [dim]v[/] hidden  "
-            "[dim]a[/] recursive select  [dim]k/j[/] up/down  [dim]I[/] preview pane  "
-            "[dim]O[/] output  [dim]P[/] run  [dim]G[/] out-folder  [dim]H[/] home"
+            "[dim]a[/] recursive select  [dim]S[/] skill  [dim]k/j[/] up/down  "
+            "[dim]I[/] preview pane  [dim]O[/] output  [dim]P[/] run  "
+            "[dim]G[/] out-folder  [dim]H[/] home"
         )
         self._apply_preview_pane_visibility()
 
@@ -278,6 +291,14 @@ class MdaNavigatorApp(App[None]):
             return "Output mode: in-place (overwrite source)"
         return "Output mode: out_dir (use input below)"
 
+    def _skill_label(self) -> str:
+        sid = self.skill_id or "(default)"
+        if self._skill_cycle_ids:
+            idx = self._skill_cycle_index + 1
+            total = len(self._skill_cycle_ids)
+            return f"Skill: {sid} ({idx}/{total}, press S to cycle)"
+        return f"Skill: {sid}"
+
     def _selection_label(self) -> str:
         if not self.selected:
             return "Selected: (none)"
@@ -319,6 +340,7 @@ class MdaNavigatorApp(App[None]):
 
         self.query_one("#path-label", Label).update(str(self.cwd))
         self.query_one("#mode-label", Label).update(self._mode_label())
+        self.query_one("#skill-label", Label).update(self._skill_label())
         self.query_one("#selection-label", Label).update(self._selection_label())
         self.query_one("#filter-label", Label).update(self._filter_status())
 
@@ -583,6 +605,15 @@ class MdaNavigatorApp(App[None]):
         i = order.index(self.output_mode)
         self.output_mode = order[(i + 1) % len(order)]
         self.query_one("#mode-label", Label).update(self._mode_label())
+
+    def action_cycle_skill(self) -> None:
+        if not self._skill_cycle_ids:
+            self.log_msg("[yellow]No bundled skills to cycle.[/]")
+            return
+        self._skill_cycle_index = (self._skill_cycle_index + 1) % len(self._skill_cycle_ids)
+        self.skill_id = self._skill_cycle_ids[self._skill_cycle_index]
+        self.query_one("#skill-label", Label).update(self._skill_label())
+        self.log_msg(f"[cyan]Skill set to[/] {self.skill_id}")
 
     def action_focus_out_dir(self) -> None:
         self.query_one("#out-dir", Input).focus()

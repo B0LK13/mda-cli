@@ -193,9 +193,11 @@ The installer uses **pipx** when available, writes `~/.config/mda-cli/python`, a
 ## Tests
 
 ```powershell
-python -m pip install -e ".[dev]"
-python -m pytest -q
+python -m pip install -e ".[dev,documents]"
+python -m pytest -q -m "not integration"
 ```
+
+Unit tests run without API keys. **Integration tests** (`pytest -m integration`) call the live Anthropic API and require `ANTHROPIC_API_KEY` in the environment; they are skipped when the key is unset.
 
 ## Vault flatten helper
 
