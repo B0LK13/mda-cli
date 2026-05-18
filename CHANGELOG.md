@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.3.2]
+
+- **TUI folder picker:** **D** shows disks/volumes (Windows drive letters; `/`, `/mnt/*`, and common mount roots on Linux/WSL). Disks also appear above `..` when browsing a volume root.
+
 ## [0.3.1]
 
 - **TUI pre-flight:** Modal before batch **P** with file count, output mode, size/token warnings, Continue/Cancel.
