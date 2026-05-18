@@ -79,6 +79,7 @@ Synonyms everywhere: `mda-cli`, `mda-tui`.
    - **Enter** opens a folder
    - **Backspace** goes up
    - **H** jumps to your home folder
+   - **D** opens the disk list (drive letters on Windows; `/`, `/mnt/*`, etc. on Linux/WSL)
    - **U** = **Use this folder** when you are in the right place
    - **I** toggles the live document preview pane (highlight a supported file to see original content)
    - **Q** quits
