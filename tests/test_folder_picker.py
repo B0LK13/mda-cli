@@ -24,7 +24,6 @@ async def test_folder_picker_use_folder(tmp_path: Path, monkeypatch: pytest.Monk
     vault.mkdir()
     (vault / "one.md").write_text("# One", encoding="utf-8")
 
-    cfg_file = tmp_path / "config.json"
     monkeypatch.setattr("mda_cli.folder_picker.set_last_folder", lambda p: None)
 
     app = FolderPickerApp(start=vault)

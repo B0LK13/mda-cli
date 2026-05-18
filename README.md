@@ -1,6 +1,6 @@
 # mda-cli
 
-**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **Gap analysis:** [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) ([tracked issues](https://github.com/B0LK13/mda-cli/issues))
+**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **Gap analysis:** [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) · **Vault playbook:** [docs/VAULT-PLAYBOOK.md](docs/VAULT-PLAYBOOK.md) · **Troubleshooting:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) ([tracked issues](https://github.com/B0LK13/mda-cli/issues))
 
 CLI for **Markdown Document Architect (MDA)** and related bundled skills: loads `SKILL.md` and companion standards (bundled by default), calls Anthropic or OpenRouter, and writes restructured output (strips the outer fence when present).
 
@@ -62,7 +62,7 @@ Synonyms everywhere: `mda-cli`, `mda-tui`.
    python -m pip install -e .
    ```
 
-2. **Set your API key**:
+2. **Set your API key** (copy [.env.example](.env.example) to `.env` locally; never commit secrets):
 
    ```powershell
    set ANTHROPIC_API_KEY=your-key-here
@@ -108,7 +108,27 @@ mda path\to\vault --dry-run
 mda path\to\file.md --in-place --backup
 ```
 
-Optional environment variables: `MDA_SKILL` (skill id), `MDA_SKILL_DIR` (explicit skill folder), `MDA_EXTENSIONS`, `MDA_MODEL`, `MDA_MAX_TOKENS`, `MDA_API_TIMEOUT`.
+Optional environment variables: `MDA_SKILL` (skill id), `MDA_SKILL_DIR` (explicit skill folder), `MDA_EXTENSIONS`, `MDA_MODEL`, `MDA_MAX_TOKENS`, `MDA_API_TIMEOUT`. See [.env.example](.env.example) for a full template.
+
+### Cost guardrails
+
+Large vaults can burn API credits quickly. Use limits on every pilot:
+
+| Control | Purpose |
+|---------|---------|
+| `--max-files N` | Stop after N supported files in a directory batch (required before a full vault run) |
+| `--max-tokens N` | Cap output tokens per file (default from `MDA_MAX_TOKENS`) |
+| `--dry-run` | Batch mode: resolve jobs without calling the API |
+| `-q` / quiet | Less console noise during long runs |
+
+Examples:
+
+```powershell
+mda E:\ObsidianVault7 -r --max-files 5 -q
+mda E:\ObsidianVault7 -r --max-files 20 --max-tokens 4096
+```
+
+TUI: select a small set of files manually before pressing **P**. See [docs/VAULT-PLAYBOOK.md](docs/VAULT-PLAYBOOK.md).
 
 **Output naming:** sibling `*.restructured.md` for the default MDA skill (including PDF/DOCX sources). The `categorize-vault-notes` skill writes `*.restructured.txt` for non-Markdown sources.
 
@@ -138,7 +158,8 @@ Assign YAML frontmatter and optional folder hints for Obsidian vaults (flat or n
 mda --skill categorize-vault-notes E:\ObsidianVault7\note.md
 mda script --list --skill categorize-vault-notes
 mda script scan_vault --skill categorize-vault-notes -- E:\ObsidianVault7 --limit 20
-mda script plan_moves --skill categorize-vault-notes -- E:\ObsidianVault7 --dry-run
+mda script plan_moves --skill categorize-vault-notes -- E:\ObsidianVault7
+mda script plan_moves --skill categorize-vault-notes -- E:\ObsidianVault7 --apply
 ```
 
 Pair with `scripts\flatten_vault_md.py` when moving nested notes to the vault root before batch categorization.
