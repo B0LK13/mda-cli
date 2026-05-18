@@ -20,7 +20,12 @@ from mda_cli.core import (
     list_bundled_skills,
     load_system_prompt,
 )
-from mda_cli.document_io import DocumentReadError, is_supported_extension, read_document_text, supported_extensions
+from mda_cli.document_io import (
+    DocumentReadError,
+    is_supported_extension,
+    read_document_text,
+    supported_extensions,
+)
 from mda_cli.preview import (
     DEFAULT_PREVIEW_MAX_CHARS,
     format_preview_metadata,
