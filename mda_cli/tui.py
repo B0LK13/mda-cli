@@ -227,6 +227,7 @@ class MdaNavigatorApp(App[None]):
         self._preview_timer = None
         self._preview_load_id: int = 0
         self._last_api_error: str | None = None
+        self._last_api_provider: str | None = None
         self._last_manifest_path: Path | None = None
         self._recursive_last_select: bool = False
         bundled = list_bundled_skills()
@@ -353,14 +354,24 @@ class MdaNavigatorApp(App[None]):
     def log_msg(self, message: str) -> None:
         self.query_one("#log", RichLog).write(message)
 
-    def _set_api_error(self, message: str | None) -> None:
+    def _set_api_error(self, message: str | None, *, provider: str | None = None) -> None:
         self._last_api_error = message
+        self._last_api_provider = provider
         label = self.query_one("#api-status", Label)
         if message:
             short = message if len(message) <= 120 else message[:117] + "..."
-            label.update(f"Last API error: {short}")
+            if provider:
+                label.update(f"Last API error ({provider}): {short}")
+            else:
+                label.update(f"Last API error: {short}")
         else:
             label.update("")
+
+    def _set_api_provider_ok(self, provider: str) -> None:
+        self._last_api_error = None
+        self._last_api_provider = provider
+        label = self.query_one("#api-status", Label)
+        label.update(f"Provider: {provider}")
 
     def _set_batch_progress(self, current: int, total: int, path: Path) -> None:
         self.query_one("#selection-label", Label).update(
@@ -827,13 +838,32 @@ class MdaNavigatorApp(App[None]):
                     backup_in_place=backup_in_place,
                 )
                 results.append(result)
+                if result.used_openrouter_fallback:
+                    thread_log(
+                        f"[green]Used OpenRouter fallback for {job.src.name}[/]"
+                    )
+                    self.call_from_thread(
+                        self._set_api_provider_ok,
+                        result.provider_used or "openrouter",
+                    )
                 if not result.ok:
                     err = result.error or "processing failed"
-                    self.call_from_thread(self._set_api_error, err)
+                    api_provider = result.provider_used or ctx.provider
+                    if err and "OpenRouter retry failed:" in err:
+                        api_provider = "anthropic+openrouter"
+                    self.call_from_thread(
+                        self._set_api_error,
+                        err,
+                        provider=api_provider,
+                    )
                     thread_log(f"[red]FAILED[/] {job.src}: {err}")
             except Exception as e:
                 err = str(e)
-                self.call_from_thread(self._set_api_error, err)
+                self.call_from_thread(
+                    self._set_api_error,
+                    err,
+                    provider=ctx.provider,
+                )
                 thread_log(f"[red]FAILED[/] {job.src}: {e}")
                 results.append(
                     JobResult(job=job, ok=False, action="failed", error=err),
