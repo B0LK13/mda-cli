@@ -1,7 +1,7 @@
 # mda-cli Gap Analysis
 
 **Baseline:** v0.2.9 (2026-05-18)  
-**Planned state:** [ROADMAP.md](ROADMAP.md)  
+**Planned state:** [ROADMAP.md](ROADMAP.md) · **Recommendations:** [RECOMMENDATIONS.md](RECOMMENDATIONS.md)  
 **Repository:** [B0LK13/mda-cli](https://github.com/B0LK13/mda-cli) (private)
 
 ---
