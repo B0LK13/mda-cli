@@ -340,8 +340,8 @@ def load_system_prompt(skill_dir: Path) -> str:
             parts.append(read_markdown_text(categories))
         else:
             sys.stderr.write(
-                f"WARNING: no MDA-STANDARD.md or references/CATEGORIES.md; "
-                f"system prompt is SKILL.md only.\n"
+                "WARNING: no MDA-STANDARD.md or references/CATEGORIES.md; "
+                "system prompt is SKILL.md only.\n"
             )
     result = "".join(parts)
     _system_prompt_cache[key] = result

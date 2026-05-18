@@ -14,7 +14,12 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, RichLog, TextArea
 
 from mda_cli.core import Job, find_skill_dir, jobs_from_document_files, load_system_prompt
-from mda_cli.document_io import DocumentReadError, is_supported_extension, read_document_text, supported_extensions
+from mda_cli.document_io import (
+    DocumentReadError,
+    is_supported_extension,
+    read_document_text,
+    supported_extensions,
+)
 from mda_cli.preview import (
     DEFAULT_PREVIEW_MAX_CHARS,
     format_preview_metadata,
@@ -113,6 +118,7 @@ class MdaNavigatorApp(App[None]):
     #preview-meta { height: auto; max-height: 3; text-style: bold; }
     #preview-body { height: 1fr; min-height: 8; }
     #log { height: 1fr; min-height: 10; background: $surface; }
+    #api-status { height: auto; max-height: 3; color: $error; }
     Label { margin: 0 0 1 0; }
     """
 
@@ -165,6 +171,7 @@ class MdaNavigatorApp(App[None]):
         self._preview_cache: tuple[Path, float, str, str | None] | None = None
         self._preview_timer = None
         self._preview_load_id: int = 0
+        self._last_api_error: str | None = None
 
     def _alloc_row_key(self) -> str:
         self._row_key_seq += 1
@@ -188,6 +195,7 @@ class MdaNavigatorApp(App[None]):
                 yield Label("", id="preview-meta")
                 yield TextArea("", id="preview-body", read_only=True)
             with Vertical(id="right"):
+                yield Label("", id="api-status")
                 yield RichLog(id="log", highlight=True, markup=True)
         yield Footer()
 
@@ -248,6 +256,20 @@ class MdaNavigatorApp(App[None]):
 
     def log_msg(self, message: str) -> None:
         self.query_one("#log", RichLog).write(message)
+
+    def _set_api_error(self, message: str | None) -> None:
+        self._last_api_error = message
+        label = self.query_one("#api-status", Label)
+        if message:
+            short = message if len(message) <= 120 else message[:117] + "..."
+            label.update(f"Last API error: {short}")
+        else:
+            label.update("")
+
+    def _set_batch_progress(self, current: int, total: int, path: Path) -> None:
+        self.query_one("#selection-label", Label).update(
+            f"Running batch {current}/{total}: {path.name}"
+        )
 
     def _mode_label(self) -> str:
         if self.output_mode == "sibling":
@@ -576,7 +598,11 @@ class MdaNavigatorApp(App[None]):
             max_tokens=self.max_tokens,
         )
         ok = 0
-        for job in jobs:
+        total = len(jobs)
+        self.call_from_thread(self._set_api_error, None)
+        for index, job in enumerate(jobs, start=1):
+            self.call_from_thread(self._set_batch_progress, index, total, job.src)
+            thread_log(f"[cyan]Batch {index}/{total}:[/] {job.src.name}")
             try:
                 result = process_job_with_provider(
                     job,
@@ -590,9 +616,19 @@ class MdaNavigatorApp(App[None]):
                 )
                 if result.ok:
                     ok += 1
+                else:
+                    err = result.error or "processing failed"
+                    self.call_from_thread(self._set_api_error, err)
+                    thread_log(f"[red]FAILED[/] {job.src}: {err}")
             except Exception as e:
+                err = str(e)
+                self.call_from_thread(self._set_api_error, err)
                 thread_log(f"[red]FAILED[/] {job.src}: {e}")
-        thread_log(f"[bold]Done.[/] {ok}/{len(jobs)} succeeded.")
+        self.call_from_thread(
+            self.query_one("#selection-label", Label).update,
+            self._selection_label(),
+        )
+        thread_log(f"[bold]Done.[/] {ok}/{total} succeeded.")
 
     async def action_run_mda(self) -> None:
         if not self.selected:

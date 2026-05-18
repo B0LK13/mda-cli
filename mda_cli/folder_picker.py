@@ -69,7 +69,7 @@ class FolderPickerApp(App[Path | None]):
             yield Label(id="path-label")
             yield Label(id="file-count-label")
             yield Label(
-                "Enter = open folder  |  Backspace = up  |  U = use this folder  |  H = home  |  Q = quit",
+                "Enter = open  |  Backspace = up  |  U = use folder  |  H = home  |  Q = quit",
                 id="hint",
             )
             yield DataTable(id="listing", zebra_stripes=True, cursor_type="row")

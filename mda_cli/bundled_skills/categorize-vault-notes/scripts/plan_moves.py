@@ -25,8 +25,18 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("vault", type=Path, help="Vault root directory")
     p.add_argument("--recursive", "-r", action="store_true", help="Include subfolders")
-    p.add_argument("--dry-run", action="store_true", help="Only print planned moves")
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="Perform moves (default is dry-run only)",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = p.parse_args()
+    apply_moves = args.apply and not args.dry_run
     vault = args.vault.expanduser().resolve()
     if not vault.is_dir():
         print(f"ERROR: not a directory: {vault}")
@@ -53,14 +63,17 @@ def main() -> int:
             continue
         planned += 1
         print(f"{path} -> {dest}")
-        if not args.dry_run:
+        if apply_moves:
             dest.parent.mkdir(parents=True, exist_ok=True)
             if dest.exists():
                 print(f"  SKIP exists: {dest}")
                 continue
             path.rename(dest)
 
-    print(f"planned={planned} skipped={skipped} dry_run={args.dry_run}")
+    mode = "apply" if apply_moves else "dry_run"
+    print(f"planned={planned} skipped={skipped} mode={mode}")
+    if not apply_moves and planned:
+        print("No files moved (dry-run). Re-run with --apply to execute moves.")
     return 0
 
 

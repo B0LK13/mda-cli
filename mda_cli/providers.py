@@ -16,8 +16,10 @@ from mda_cli.core import (
     DEFAULT_API_TIMEOUT,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
-    friendly_api_message as _friendly_anthropic,
     strip_outer_fence,
+)
+from mda_cli.core import (
+    friendly_api_message as _friendly_anthropic,
 )
 
 ProviderName = Literal["anthropic", "openrouter"]

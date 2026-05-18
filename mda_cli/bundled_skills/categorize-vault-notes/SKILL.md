@@ -51,11 +51,12 @@ Run via `mda script` (see mda-cli README):
 | Script | Purpose |
 |--------|---------|
 | `scan_vault.py` | List `.md` files with size and frontmatter keys |
-| `plan_moves.py` | Read `folder` from frontmatter and print a move plan (dry-run) |
+| `plan_moves.py` | Read `folder` from frontmatter and print a move plan (dry-run by default; `--apply` to move) |
 
 Example:
 
 ```bash
 mda script scan_vault -- E:\ObsidianVault7 --limit 20
-mda script plan_moves -- E:\ObsidianVault7 --dry-run
+mda script plan_moves -- E:\ObsidianVault7
+mda script plan_moves -- E:\ObsidianVault7 --apply
 ```

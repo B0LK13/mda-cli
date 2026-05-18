@@ -13,8 +13,8 @@ from mda_cli.providers import (
     build_restructure_client,
     openrouter_api_key_set,
     openrouter_fallback_enabled,
-    resolve_provider_name,
     resolve_model,
+    resolve_provider_name,
 )
 
 
